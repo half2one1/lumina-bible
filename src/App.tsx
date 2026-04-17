@@ -12,6 +12,8 @@ import {
   Languages,
   Bookmark,
   Type,
+  Moon,
+  Eye,
 } from 'lucide-react';
 import {
   BIBLE_BOOKS,
@@ -169,6 +171,9 @@ export default function App() {
   const [showOriginal, setShowOriginal] = useState(() => {
     return localStorage.getItem('lumina-show-orig') !== 'false';
   });
+  const [theme, setTheme] = useState<'light' | 'dark' | 'sepia'>(() => {
+    return (localStorage.getItem('lumina-theme') as 'light' | 'dark' | 'sepia') || 'light';
+  });
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -183,6 +188,7 @@ export default function App() {
   useEffect(() => { localStorage.setItem('lumina-show-en', String(showEnglish)); }, [showEnglish]);
   useEffect(() => { localStorage.setItem('lumina-show-kr', String(showKorean)); }, [showKorean]);
   useEffect(() => { localStorage.setItem('lumina-show-orig', String(showOriginal)); }, [showOriginal]);
+  useEffect(() => { localStorage.setItem('lumina-theme', theme); }, [theme]);
   useEffect(() => { localStorage.setItem('lumina-orig-font', originalFontSize); }, [originalFontSize]);
   useEffect(() => { localStorage.setItem('lumina-trans-font', translationFontSize); }, [translationFontSize]);
 
@@ -513,7 +519,7 @@ export default function App() {
   const progressPercent = Math.round((chaptersRead / totalChapters) * 100);
 
   return (
-    <div className="flex flex-col h-screen bg-bible-bg text-bible-ink max-w-[420px] mx-auto border-x shadow-2xl relative overflow-hidden">
+    <div className={`flex flex-col h-screen bg-bible-bg text-bible-ink max-w-[420px] mx-auto border-x shadow-2xl relative overflow-hidden ${theme}`}>
       {/* Header */}
       <header className="shrink-0 p-4 pb-3 border-b border-bible-border bg-white z-10 space-y-3">
         <div className="flex items-center justify-between">
@@ -586,6 +592,52 @@ export default function App() {
                         </div>
                         <span className={`text-[10px] font-bold uppercase ${showKorean ? 'text-bible-accent' : 'text-bible-muted'}`}>
                           {showKorean ? 'ON' : 'OFF'}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <Separator className="bg-bible-border" />
+
+                  {/* Theme & Display */}
+                  <div className="space-y-4">
+                    <label className="text-[10px] font-extrabold text-bible-secondary uppercase tracking-[2px]">
+                      Theme & Display
+                    </label>
+                    <div className="space-y-2">
+                       {/* Dark Mode */}
+                       <button
+                        onClick={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors ${
+                          theme === 'dark'
+                            ? 'border-bible-accent bg-bible-accent text-white'
+                            : 'border-bible-border bg-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Moon className="w-4 h-4" />
+                          <span className="text-[12px] font-bold">Dark Mode</span>
+                        </div>
+                        <span className={`text-[10px] font-bold uppercase ${theme === 'dark' ? 'text-white' : 'text-bible-muted'}`}>
+                          {theme === 'dark' ? 'ON' : 'OFF'}
+                        </span>
+                      </button>
+
+                      {/* Eye-Health Mode */}
+                      <button
+                        onClick={() => setTheme(prev => prev === 'sepia' ? 'light' : 'sepia')}
+                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors ${
+                          theme === 'sepia'
+                            ? 'border-[#5D4037] bg-[#F4ECD8] text-[#5D4037]'
+                            : 'border-bible-border bg-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <Eye className="w-4 h-4" />
+                          <span className="text-[12px] font-bold">Eye-Health (Sepia)</span>
+                        </div>
+                        <span className={`text-[10px] font-bold uppercase ${theme === 'sepia' ? 'text-[#5D4037]' : 'text-bible-muted'}`}>
+                          {theme === 'sepia' ? 'ON' : 'OFF'}
                         </span>
                       </button>
                     </div>
