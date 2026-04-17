@@ -171,9 +171,62 @@ export default function App() {
   const [showOriginal, setShowOriginal] = useState(() => {
     return localStorage.getItem('lumina-show-orig') !== 'false';
   });
-  const [theme, setTheme] = useState<'light' | 'dark' | 'sepia'>(() => {
-    return (localStorage.getItem('lumina-theme') as 'light' | 'dark' | 'sepia') || 'light';
+  const [theme, setTheme] = useState<'light' | 'theme-dark' | 'theme-sepia'>(() => {
+    return (localStorage.getItem('lumina-theme') as 'light' | 'theme-dark' | 'theme-sepia') || 'light';
   });
+
+  // ── Theme color maps (runtime override via inline CSS vars) ──────────────
+  const THEMES = {
+    light: {
+      '--color-bible-bg':         '#FFFFFF',
+      '--color-bible-page':       '#F7F7F5',
+      '--color-bible-ink':        '#2C2C2C',
+      '--color-bible-accent':     '#2C2C2C',
+      '--color-bible-muted':      '#8E8E93',
+      '--color-bible-secondary':  '#A0A0A0',
+      '--color-bible-border':     '#F0F0F0',
+      '--color-bible-card-border':'#E0E0E0',
+      '--color-bible-surface':    '#F2F2F2',
+    },
+    'theme-dark': {
+      '--color-bible-bg':         '#1A1A1A',
+      '--color-bible-page':       '#121212',
+      '--color-bible-ink':        '#E0E0E0',
+      '--color-bible-accent':     '#B0B0B0',
+      '--color-bible-muted':      '#6A6A6A',
+      '--color-bible-secondary':  '#555555',
+      '--color-bible-border':     '#2A2A2A',
+      '--color-bible-card-border':'#383838',
+      '--color-bible-surface':    '#252525',
+    },
+    'theme-sepia': {
+      '--color-bible-bg':         '#F4ECD8',
+      '--color-bible-page':       '#E9DFC4',
+      '--color-bible-ink':        '#433422',
+      '--color-bible-accent':     '#5D4037',
+      '--color-bible-muted':      '#8F745C',
+      '--color-bible-secondary':  '#A6907C',
+      '--color-bible-border':     '#DFD3B6',
+      '--color-bible-card-border':'#D1C4A5',
+      '--color-bible-surface':    '#EDE2C9',
+    },
+  } as const;
+
+  const themeStyle = THEMES[theme] as React.CSSProperties;
+
+  // Apply theme class to <html> so CSS variables cascade to all portals/overlays
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.remove('theme-dark', 'theme-sepia');
+    if (theme === 'theme-dark') root.classList.add('theme-dark');
+    else if (theme === 'theme-sepia') root.classList.add('theme-sepia');
+  }, [theme]);
+
+  // Also apply data-theme to document root for CSS variable overrides
+  useEffect(() => {
+    const themeValue = theme === 'theme-dark' ? 'dark' : theme === 'theme-sepia' ? 'sepia' : 'light';
+    document.documentElement.dataset.theme = themeValue;
+  }, [theme]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -519,9 +572,17 @@ export default function App() {
   const progressPercent = Math.round((chaptersRead / totalChapters) * 100);
 
   return (
-    <div className={`flex flex-col h-screen bg-bible-bg text-bible-ink max-w-[420px] mx-auto border-x shadow-2xl relative overflow-hidden ${theme}`}>
+    <div
+      className="flex flex-col h-screen max-w-[420px] mx-auto border-x shadow-2xl relative overflow-hidden"
+      style={themeStyle}
+      data-theme={theme}
+    >
+      <style>{`
+        [data-theme="theme-dark"] { background-color: #1A1A1A; color: #E0E0E0; }
+        [data-theme="theme-sepia"] { background-color: #F4ECD8; color: #433422; }
+      `}</style>
       {/* Header */}
-      <header className="shrink-0 p-4 pb-3 border-b border-bible-border bg-white z-10 space-y-3">
+      <header className="shrink-0 p-4 pb-3 border-b border-bible-border bg-bible-bg z-10 space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <BookIcon className="w-5 h-5 text-bible-accent" />
@@ -565,8 +626,8 @@ export default function App() {
                         onClick={() => setShowEnglish(!showEnglish)}
                         className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors ${
                           showEnglish
-                            ? 'border-bible-accent bg-bible-accent/5'
-                            : 'border-bible-border bg-white'
+                            ? 'border-bible-accent bg-bible-accent/10'
+                            : 'border-bible-border bg-bible-surface'
                         }`}
                       >
                         <div className="flex items-center gap-2">
@@ -582,8 +643,8 @@ export default function App() {
                         onClick={() => setShowKorean(!showKorean)}
                         className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors ${
                           showKorean
-                            ? 'border-bible-accent bg-bible-accent/5'
-                            : 'border-bible-border bg-white'
+                            ? 'border-bible-accent bg-bible-accent/10'
+                            : 'border-bible-border bg-bible-surface'
                         }`}
                       >
                         <div className="flex items-center gap-2">
@@ -607,37 +668,37 @@ export default function App() {
                     <div className="space-y-2">
                        {/* Dark Mode */}
                        <button
-                        onClick={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+                        onClick={() => setTheme(prev => prev === 'theme-dark' ? 'light' : 'theme-dark')}
                         className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors ${
-                          theme === 'dark'
-                            ? 'border-bible-accent bg-bible-accent text-white'
-                            : 'border-bible-border bg-white'
+                          theme === 'theme-dark'
+                            ? 'border-bible-accent bg-bible-accent/20 text-bible-ink'
+                            : 'border-bible-border bg-bible-surface text-bible-ink'
                         }`}
                       >
                         <div className="flex items-center gap-2">
                           <Moon className="w-4 h-4" />
                           <span className="text-[12px] font-bold">Dark Mode</span>
                         </div>
-                        <span className={`text-[10px] font-bold uppercase ${theme === 'dark' ? 'text-white' : 'text-bible-muted'}`}>
-                          {theme === 'dark' ? 'ON' : 'OFF'}
+                        <span className={`text-[10px] font-bold uppercase ${theme === 'theme-dark' ? 'text-bible-accent' : 'text-bible-muted'}`}>
+                          {theme === 'theme-dark' ? 'ON' : 'OFF'}
                         </span>
                       </button>
 
                       {/* Eye-Health Mode */}
                       <button
-                        onClick={() => setTheme(prev => prev === 'sepia' ? 'light' : 'sepia')}
+                        onClick={() => setTheme(prev => prev === 'theme-sepia' ? 'light' : 'theme-sepia')}
                         className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors ${
-                          theme === 'sepia'
-                            ? 'border-[#5D4037] bg-[#F4ECD8] text-[#5D4037]'
-                            : 'border-bible-border bg-white'
+                          theme === 'theme-sepia'
+                            ? 'border-bible-accent bg-bible-accent/20 text-bible-ink'
+                            : 'border-bible-border bg-bible-surface text-bible-ink'
                         }`}
                       >
                         <div className="flex items-center gap-2">
                           <Eye className="w-4 h-4" />
                           <span className="text-[12px] font-bold">Eye-Health (Sepia)</span>
                         </div>
-                        <span className={`text-[10px] font-bold uppercase ${theme === 'sepia' ? 'text-[#5D4037]' : 'text-bible-muted'}`}>
-                          {theme === 'sepia' ? 'ON' : 'OFF'}
+                        <span className={`text-[10px] font-bold uppercase ${theme === 'theme-sepia' ? 'text-bible-accent' : 'text-bible-muted'}`}>
+                          {theme === 'theme-sepia' ? 'ON' : 'OFF'}
                         </span>
                       </button>
                     </div>
@@ -711,7 +772,7 @@ export default function App() {
       </header>
 
       {/* Navigation Bar */}
-      <div className="shrink-0 px-5 py-3 bg-white border-b border-bible-border">
+      <div className="shrink-0 px-5 py-3 bg-bible-bg border-b border-bible-border">
         <button
           onClick={() => setIsBookPickerOpen(true)}
           className="flex items-center gap-1 mb-1"
@@ -820,7 +881,7 @@ export default function App() {
                 <Input
                   autoFocus
                   placeholder="Search across all scriptures..."
-                  className="pl-10 bg-white border-none shadow-sm"
+                  className="pl-10 bg-bible-surface border-none shadow-sm"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
@@ -951,7 +1012,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* Chapter Picker Bar */}
-      <div className="shrink-0 border-t border-bible-border bg-white">
+      <div className="shrink-0 border-t border-bible-border bg-bible-bg">
         <div className="px-3 py-2 overflow-x-auto">
           <div className="flex gap-1">
             {Array.from({ length: currentBook.chapters }, (_, i) => i + 1).map(ch => (
@@ -986,7 +1047,7 @@ const SearchResultCard: React.FC<{
   return (
     <button
       onClick={onClick}
-      className="w-full text-left p-3 bg-white rounded-lg shadow-sm border border-black/5 hover:border-bible-accent/30 hover:shadow-md transition-all duration-200 active:scale-[0.98] cursor-pointer"
+      className="w-full text-left p-3 bg-bible-bg rounded-lg shadow-sm border border-bible-card-border hover:border-bible-accent/30 hover:shadow-md transition-all duration-200 active:scale-[0.98] cursor-pointer"
     >
       <div className="flex items-center gap-2 mb-1.5 flex-wrap">
         <Badge variant="outline" className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0 shrink-0">
