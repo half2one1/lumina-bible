@@ -1,0 +1,15 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Bible data (re-download with: npm run download-bible)
+public/data/he/
+public/data/ar/
+public/data/gr/
+public/data/kjv/
+public/data/krv/

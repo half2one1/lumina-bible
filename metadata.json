@@ -1,0 +1,6 @@
+{
+  "name": "Lumina Bible",
+  "description": "A refined multi-lingual Bible reader with interlinear Hebrew/Greek support and verse comparison.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["offline-reading", "interlinear-study"]
+}
