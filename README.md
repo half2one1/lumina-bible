@@ -13,6 +13,9 @@
   - Independent **Font Size Cycling** for original and translation text (Tap to cycle).
   - **Auto-Scroll & Highlighting**: Perfectly locatable verses when navigating from search.
   - **Word Selection**: Full support for text selection and copy/lookup while maintaining interactive tap controls.
+- **Smart Persistence**: 
+  - **Search Caching**: Remembers your last search query and results for instant recall.
+  - **Verse Tracking**: Automatically remembers and resumes from the exact verse you were last reading.
 - **Cross-Platform**: Built with React and Tauri for Web, Desktop (Windows/Mac/Linux), and Mobile.
 
 ## 🚀 Getting Started

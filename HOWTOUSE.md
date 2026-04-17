@@ -66,3 +66,23 @@ Lumina is built with Tauri, meaning it can be run as a native desktop applicatio
 
 - **Persistent Settings**: Your font size preferences and reading progress are automatically saved to your device.
 - **Local Data**: Use the build scripts to download the entire Bible for offline usage.
+
+---
+
+## 7. Search Caching (Previous Search)
+
+Lumina automatically remembers your most recent search session.
+
+- **Instant Recall**: When you reopen the search bar, your last search query and all findings are displayed as a "Previous Search" list.
+- **Save Across Sessions**: This cache persists even if you close the app or refresh the page.
+- **Clear Cache**: Use the "Clear Cache" button within the search menu to reset your history.
+
+---
+
+## 8. Study Progress & Auto-Resume
+
+Never lose your place again. Lumina tracks your study progress at the individual verse level.
+
+- **Last Seen Verse**: As you scroll, the app intelligently tracks which verse is in the center of your screen.
+- **Auto-Scroll**: When you return to the app, it automatically navigates to the correct Book and Chapter, and then smoothly scrolls down to the exact verse where you left off.
+- **Reading Window**: The app uses an intersection detector (focusing on the middle 20% of your screen) to ensure your progress is saved accurately as you read.
