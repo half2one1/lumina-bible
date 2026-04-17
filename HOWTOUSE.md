@@ -8,9 +8,9 @@ The main view presents the original scripture text (Hebrew, Arabic, or Greek) as
 
 ![Main View](public/screenshots/01_home_view.png)
 
-- **Original Text**: displayed in the center.
+- **Original Text**: Displayed in the center. Toggle visibility by clicking the **Language Badge** (e.g., "HEBREW") in the header.
 - **Translations**: Toggle visibility via the Settings drawer (top right gear icon).
-
+- **Smart Fallback**: If you turn OFF the Original text, English, and Korean simultaneously, the app will automatically default to showing the **Korean translation** to ensure you always have scripture on screen.
 ---
 
 ## 2. Navigation & Book Selection

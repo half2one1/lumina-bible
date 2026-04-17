@@ -166,6 +166,9 @@ export default function App() {
   const [showKorean, setShowKorean] = useState(() => {
     return localStorage.getItem('lumina-show-kr') !== 'false';
   });
+  const [showOriginal, setShowOriginal] = useState(() => {
+    return localStorage.getItem('lumina-show-orig') !== 'false';
+  });
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -179,6 +182,7 @@ export default function App() {
   // Persist settings
   useEffect(() => { localStorage.setItem('lumina-show-en', String(showEnglish)); }, [showEnglish]);
   useEffect(() => { localStorage.setItem('lumina-show-kr', String(showKorean)); }, [showKorean]);
+  useEffect(() => { localStorage.setItem('lumina-show-orig', String(showOriginal)); }, [showOriginal]);
   useEffect(() => { localStorage.setItem('lumina-orig-font', originalFontSize); }, [originalFontSize]);
   useEffect(() => { localStorage.setItem('lumina-trans-font', translationFontSize); }, [translationFontSize]);
 
@@ -216,12 +220,14 @@ export default function App() {
     setLoading(true);
     setError(null);
 
+    const isKoreanOn = showKorean || (!showOriginal && !showEnglish && !showKorean);
+
     const promises: [Promise<ChapterData>, Promise<ChapterData | null>, Promise<ChapterData | null>] = [
       bibleService.getChapter(currentBook, currentChapter),
       showEnglish
         ? bibleService.getTranslation('kjv', currentBook.number, currentChapter)
         : Promise.resolve(null),
-      showKorean
+      isKoreanOn
         ? bibleService.getTranslation('krv', currentBook.number, currentChapter)
         : Promise.resolve(null),
     ];
@@ -244,7 +250,7 @@ export default function App() {
       });
 
     return () => { cancelled = true; };
-  }, [currentBook, currentChapter, showEnglish, showKorean]);
+  }, [currentBook, currentChapter, showEnglish, showKorean, showOriginal]);
 
   // Scroll to saved progress verse on initial load
   const hasAutoScrolled = useRef(false);
@@ -311,9 +317,13 @@ export default function App() {
 
   const filteredVerses = useMemo(() => {
     if (!chapterData) return [];
-    if (!searchQuery || isSearchOpen) return chapterData.verses;
     return chapterData.verses;
-  }, [chapterData, searchQuery, isSearchOpen]);
+  }, [chapterData]);
+
+  // Language visibility with fallback (Show Korean if all are off)
+  const isOriginalOn = showOriginal;
+  const isEnglishOn = showEnglish;
+  const isKoreanOn = showKorean || (!showOriginal && !showEnglish && !showKorean);
 
   // Global search across all books — streams results progressively
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -512,7 +522,16 @@ export default function App() {
             <h1 className="font-sans text-lg font-bold tracking-tight">Lumina</h1>
           </div>
           <div className="flex items-center gap-1">
-            <Badge variant="outline" className="text-[10px] font-bold uppercase tracking-wider">
+            <Badge 
+              variant={showOriginal ? "default" : "outline"} 
+              className={`text-[10px] font-bold uppercase tracking-wider cursor-pointer transition-all duration-300 ${
+                showOriginal 
+                  ? 'bg-bible-accent text-white border-transparent hover:bg-bible-accent/90' 
+                  : 'text-bible-muted border-bible-border hover:bg-bible-surface bg-transparent'
+              }`}
+              onClick={() => setShowOriginal(!showOriginal)}
+              title={showOriginal ? "Hide Original Script" : "Show Original Script"}
+            >
               {LANGUAGE_LABELS[currentBook.language]}
             </Badge>
             <Sheet>
@@ -719,8 +738,9 @@ export default function App() {
                   key={verse.number}
                   verse={verse}
                   language={currentBook.language}
-                  englishText={showEnglish ? kjvMap.get(verse.number) : undefined}
-                  koreanText={showKorean ? krvMap.get(verse.number) : undefined}
+                  showOriginal={isOriginalOn}
+                  englishText={isEnglishOn ? kjvMap.get(verse.number) : undefined}
+                  koreanText={isKoreanOn ? krvMap.get(verse.number) : undefined}
                   originalFontSize={originalFontSize}
                   translationFontSize={translationFontSize}
                   onOriginalFontCycle={() => setOriginalFontSize(prev => nextFontSize(prev))}
@@ -1013,6 +1033,7 @@ function handleClickIfNoSelection(callback: () => void) {
 const VerseItem: React.FC<{
   verse: Verse;
   language: Language;
+  showOriginal: boolean;
   englishText?: string;
   koreanText?: string;
   originalFontSize: FontSizePreset;
@@ -1020,7 +1041,7 @@ const VerseItem: React.FC<{
   onOriginalFontCycle: () => void;
   onTranslationFontCycle: () => void;
   isHighlighted?: boolean;
-}> = ({ verse, language, englishText, koreanText, originalFontSize, translationFontSize, onOriginalFontCycle, onTranslationFontCycle, isHighlighted }) => {
+}> = ({ verse, language, showOriginal, englishText, koreanText, originalFontSize, translationFontSize, onOriginalFontCycle, onTranslationFontCycle, isHighlighted }) => {
   const rtl = isRTL(language);
   const fontClass = language === 'HE' ? 'font-he' : language === 'AR' ? 'font-ar' : '';
   const origSizeClass = rtl ? ORIGINAL_RTL_FONT_SIZES[originalFontSize] : ORIGINAL_FONT_SIZES[originalFontSize];
@@ -1038,13 +1059,15 @@ const VerseItem: React.FC<{
         <span className="shrink-0 w-6 h-6 rounded-full bg-bible-accent flex items-center justify-center mt-1">
           <span className="text-[9px] font-bold text-white">{verse.number}</span>
         </span>
-        <p
-          className={`font-serif text-bible-ink flex-1 cursor-pointer hover:bg-bible-surface/50 rounded-md transition-colors px-1 -mx-1 ${fontClass} ${origSizeClass}`}
-          onClick={handleClickIfNoSelection(onOriginalFontCycle)}
-          title={`Font size: ${FONT_SIZE_LABELS[originalFontSize]} — tap to change`}
-        >
-          {verse.text}
-        </p>
+        {showOriginal && (
+          <p
+            className={`font-serif text-bible-ink flex-1 cursor-pointer hover:bg-bible-surface/50 rounded-md transition-colors px-1 -mx-1 ${fontClass} ${origSizeClass}`}
+            onClick={handleClickIfNoSelection(onOriginalFontCycle)}
+            title={`Font size: ${FONT_SIZE_LABELS[originalFontSize]} — tap to change`}
+          >
+            {verse.text}
+          </p>
+        )}
       </div>
 
       {/* Translations */}
