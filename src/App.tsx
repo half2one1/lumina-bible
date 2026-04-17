@@ -11,6 +11,7 @@ import {
   Loader2,
   Languages,
   Bookmark,
+  Type,
 } from 'lucide-react';
 import {
   BIBLE_BOOKS,
@@ -32,6 +33,61 @@ const LANGUAGE_LABELS: Record<Language, string> = {
   AR: 'Arabic',
   GR: 'Greek',
 };
+
+// ── Font Size Presets ───────────────────────────────────────────────────
+
+type FontSizePreset = 'small' | 'medium' | 'big' | 'very-big';
+
+const FONT_SIZE_ORDER: FontSizePreset[] = ['small', 'medium', 'big', 'very-big'];
+
+const FONT_SIZE_LABELS: Record<FontSizePreset, string> = {
+  'small': 'S',
+  'medium': 'M',
+  'big': 'L',
+  'very-big': 'XL',
+};
+
+const ORIGINAL_FONT_SIZES: Record<FontSizePreset, string> = {
+  'small': 'text-sm leading-[1.7]',
+  'medium': 'text-base leading-[1.9]',
+  'big': 'text-xl leading-[2.1]',
+  'very-big': 'text-2xl leading-[2.3]',
+};
+
+const ORIGINAL_RTL_FONT_SIZES: Record<FontSizePreset, string> = {
+  'small': 'text-base leading-[1.9]',
+  'medium': 'text-xl leading-[2.2]',
+  'big': 'text-2xl leading-[2.4]',
+  'very-big': 'text-3xl leading-[2.6]',
+};
+
+const TRANSLATION_FONT_SIZES: Record<FontSizePreset, string> = {
+  'small': 'text-[11px] leading-snug',
+  'medium': 'text-[13px] leading-relaxed',
+  'big': 'text-[15px] leading-relaxed',
+  'very-big': 'text-[18px] leading-relaxed',
+};
+
+function nextFontSize(current: FontSizePreset): FontSizePreset {
+  const idx = FONT_SIZE_ORDER.indexOf(current);
+  return FONT_SIZE_ORDER[(idx + 1) % FONT_SIZE_ORDER.length];
+}
+
+// ── Search Result Types ─────────────────────────────────────────────────
+
+type MatchSource = 'original' | 'en' | 'kr';
+
+interface SearchResult {
+  bookNumber: number;
+  bookName: string;
+  chapter: number;
+  verseNumber: number;
+  text: string;
+  language: Language;
+  matchedIn: MatchSource[];
+  englishText?: string;
+  koreanText?: string;
+}
 
 // ── Reading Progress ────────────────────────────────────────────────────
 
@@ -77,6 +133,18 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isBookPickerOpen, setIsBookPickerOpen] = useState(false);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchDone, setSearchDone] = useState(false);
+  const [highlightedVerse, setHighlightedVerse] = useState<number | null>(null);
+
+  // Font size presets
+  const [originalFontSize, setOriginalFontSize] = useState<FontSizePreset>(() => {
+    return (localStorage.getItem('lumina-orig-font') as FontSizePreset) || 'medium';
+  });
+  const [translationFontSize, setTranslationFontSize] = useState<FontSizePreset>(() => {
+    return (localStorage.getItem('lumina-trans-font') as FontSizePreset) || 'medium';
+  });
 
   // Language learning settings — both can be on simultaneously
   const [showEnglish, setShowEnglish] = useState(() => {
@@ -98,6 +166,8 @@ export default function App() {
   // Persist settings
   useEffect(() => { localStorage.setItem('lumina-show-en', String(showEnglish)); }, [showEnglish]);
   useEffect(() => { localStorage.setItem('lumina-show-kr', String(showKorean)); }, [showKorean]);
+  useEffect(() => { localStorage.setItem('lumina-orig-font', originalFontSize); }, [originalFontSize]);
+  useEffect(() => { localStorage.setItem('lumina-trans-font', translationFontSize); }, [translationFontSize]);
 
   // Save reading progress on navigation
   useEffect(() => {
@@ -153,11 +223,149 @@ export default function App() {
 
   const filteredVerses = useMemo(() => {
     if (!chapterData) return [];
-    if (!searchQuery) return chapterData.verses;
-    return chapterData.verses.filter(v =>
-      v.text.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [chapterData, searchQuery]);
+    if (!searchQuery || isSearchOpen) return chapterData.verses;
+    return chapterData.verses;
+  }, [chapterData, searchQuery, isSearchOpen]);
+
+  // Global search across all books — streams results progressively
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    // Cancel any in-progress search
+    if (searchAbortRef.current) {
+      searchAbortRef.current.abort();
+      searchAbortRef.current = null;
+    }
+
+    if (!searchQuery || searchQuery.length < 2) {
+      setSearchResults([]);
+      setIsSearching(false);
+      setSearchDone(false);
+      return;
+    }
+
+    setIsSearching(true);
+    setSearchDone(false);
+    setSearchResults([]);
+
+    if (searchTimerRef.current) {
+      clearTimeout(searchTimerRef.current);
+    }
+
+    searchTimerRef.current = setTimeout(async () => {
+      const abortCtrl = new AbortController();
+      searchAbortRef.current = abortCtrl;
+      const query = searchQuery.toLowerCase();
+      let batch: SearchResult[] = [];
+
+      for (const book of BIBLE_BOOKS) {
+        if (abortCtrl.signal.aborted) return;
+
+        for (let ch = 1; ch <= book.chapters; ch++) {
+          if (abortCtrl.signal.aborted) return;
+
+          try {
+            const [originalData, kjvChapter, krvChapter] = await Promise.all([
+              bibleService.getChapter(book, ch).catch(() => null),
+              bibleService.getTranslation('kjv', book.number, ch).catch(() => null),
+              bibleService.getTranslation('krv', book.number, ch).catch(() => null),
+            ]);
+
+            if (!originalData || abortCtrl.signal.aborted) continue;
+
+            const kjvVerseMap = new Map<number, string>();
+            const krvVerseMap = new Map<number, string>();
+            if (kjvChapter) kjvChapter.verses.forEach(v => kjvVerseMap.set(v.number, v.text));
+            if (krvChapter) krvChapter.verses.forEach(v => krvVerseMap.set(v.number, v.text));
+
+            for (const verse of originalData.verses) {
+              const enText = kjvVerseMap.get(verse.number);
+              const krText = krvVerseMap.get(verse.number);
+
+              const matchedIn: MatchSource[] = [];
+              if (verse.text.toLowerCase().includes(query)) matchedIn.push('original');
+              if (enText && enText.toLowerCase().includes(query)) matchedIn.push('en');
+              if (krText && krText.toLowerCase().includes(query)) matchedIn.push('kr');
+
+              if (matchedIn.length > 0) {
+                batch.push({
+                  bookNumber: book.number,
+                  bookName: book.nameEn,
+                  chapter: ch,
+                  verseNumber: verse.number,
+                  text: verse.text,
+                  language: book.language,
+                  matchedIn,
+                  englishText: enText,
+                  koreanText: krText,
+                });
+              }
+            }
+
+            // Flush batch every chapter to stream results to UI
+            if (batch.length > 0 && !abortCtrl.signal.aborted) {
+              const toFlush = batch;
+              batch = [];
+              setSearchResults(prev => [...prev, ...toFlush]);
+              setIsSearching(true); // still searching
+            }
+          } catch {
+            // Chapter not available, skip
+          }
+        }
+      }
+
+      if (!abortCtrl.signal.aborted) {
+        if (batch.length > 0) {
+          setSearchResults(prev => [...prev, ...batch]);
+        }
+        setIsSearching(false);
+        setSearchDone(true);
+      }
+    }, 400);
+
+    return () => {
+      if (searchTimerRef.current) {
+        clearTimeout(searchTimerRef.current);
+      }
+      if (searchAbortRef.current) {
+        searchAbortRef.current.abort();
+      }
+    };
+  }, [searchQuery]);
+
+  const handleSearchResultClick = useCallback((result: SearchResult) => {
+    setCurrentBookNumber(result.bookNumber);
+    setCurrentChapter(result.chapter);
+    setHighlightedVerse(result.verseNumber);
+    setIsSearchOpen(false);
+    setSearchQuery('');
+    setSearchResults([]);
+    setSearchDone(false);
+  }, []);
+
+  // Scroll to highlighted verse after chapter loads
+  useEffect(() => {
+    if (highlightedVerse !== null && !loading && chapterData) {
+      const timer = setTimeout(() => {
+        const el = document.getElementById(`verse-${highlightedVerse}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 350); // wait for animation
+
+      // Clear highlight after 3 seconds
+      const clearTimer = setTimeout(() => {
+        setHighlightedVerse(null);
+      }, 3500);
+
+      return () => {
+        clearTimeout(timer);
+        clearTimeout(clearTimer);
+      };
+    }
+  }, [highlightedVerse, loading, chapterData]);
 
   const handleNextChapter = useCallback(() => {
     if (currentChapter < currentBook.chapters) {
@@ -418,6 +626,11 @@ export default function App() {
                   language={currentBook.language}
                   englishText={showEnglish ? kjvMap.get(verse.number) : undefined}
                   koreanText={showKorean ? krvMap.get(verse.number) : undefined}
+                  originalFontSize={originalFontSize}
+                  translationFontSize={translationFontSize}
+                  onOriginalFontCycle={() => setOriginalFontSize(prev => nextFontSize(prev))}
+                  onTranslationFontCycle={() => setTranslationFontSize(prev => nextFontSize(prev))}
+                  isHighlighted={highlightedVerse === verse.number}
                 />
               ))}
             </motion.div>
@@ -434,12 +647,12 @@ export default function App() {
             exit={{ opacity: 0, scale: 0.95 }}
             className="absolute inset-0 z-50 bg-bible-bg p-4 flex flex-col"
           >
-            <div className="flex items-center gap-2 mb-4">
+            <div className="flex items-center gap-2 mb-3">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bible-muted" />
                 <Input
                   autoFocus
-                  placeholder="Search verses..."
+                  placeholder="Search across all scriptures..."
                   className="pl-10 bg-white border-none shadow-sm"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -448,23 +661,98 @@ export default function App() {
               <Button variant="ghost" size="icon" onClick={() => {
                 setIsSearchOpen(false);
                 setSearchQuery('');
+                setSearchResults([]);
               }}>
                 <X className="w-5 h-5" />
               </Button>
             </div>
+
+            {searchQuery.length >= 2 && (
+              <div className="mb-3 flex items-center gap-2">
+                <span className="text-[10px] font-bold text-bible-secondary uppercase tracking-wider">
+                  {isSearching
+                    ? `Searching... (${searchResults.length} found so far)`
+                    : `${searchResults.length} result${searchResults.length !== 1 ? 's' : ''} found`}
+                </span>
+                {isSearching && (
+                  <Loader2 className="w-3 h-3 animate-spin text-bible-muted" />
+                )}
+              </div>
+            )}
+
             <div className="flex-1 overflow-y-auto">
-              <div className="space-y-4">
-                {filteredVerses.length === 0 ? (
-                  <p className="text-center text-bible-muted py-10">No results found</p>
+              <div className="space-y-2">
+                {searchQuery.length < 2 ? (
+                  <p className="text-center text-bible-muted py-10 text-sm">Type at least 2 characters to search</p>
+                ) : searchResults.length === 0 && isSearching ? (
+                  <div className="flex items-center justify-center py-10">
+                    <Loader2 className="w-5 h-5 animate-spin text-bible-muted" />
+                  </div>
+                ) : searchResults.length === 0 && searchDone ? (
+                  <p className="text-center text-bible-muted py-10 text-sm">No results found</p>
                 ) : (
-                  filteredVerses.map(v => (
-                    <div key={v.number} className={`p-3 bg-white rounded-lg shadow-sm border border-black/5 ${rtl ? 'text-right' : ''}`}>
-                      <span className="text-xs font-bold text-bible-accent mr-2">{v.number}</span>
-                      <span className={`text-sm leading-relaxed ${rtl ? (currentBook.language === 'HE' ? 'font-he' : 'font-ar') : ''}`}>
-                        {v.text}
-                      </span>
-                    </div>
-                  ))
+                  <>
+                    {searchResults.map((result, idx) => {
+                      const resultRtl = isRTL(result.language);
+                      const fontClass = result.language === 'HE' ? 'font-he' : result.language === 'AR' ? 'font-ar' : '';
+                      return (
+                        <button
+                          key={`${result.bookNumber}-${result.chapter}-${result.verseNumber}-${idx}`}
+                          onClick={() => handleSearchResultClick(result)}
+                          className="w-full text-left p-3 bg-white rounded-lg shadow-sm border border-black/5 hover:border-bible-accent/30 hover:shadow-md transition-all duration-200 active:scale-[0.98] cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                            <Badge variant="outline" className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0 shrink-0">
+                              {result.language}
+                            </Badge>
+                            <span className="text-[11px] font-bold text-bible-accent truncate">
+                              {result.bookName}
+                            </span>
+                            <span className="text-[10px] text-bible-muted shrink-0">
+                              {result.chapter}:{result.verseNumber}
+                            </span>
+                            <span className="flex gap-1 ml-auto shrink-0">
+                              {result.matchedIn.map(src => (
+                                <span
+                                  key={src}
+                                  className={`text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${
+                                    src === 'original' ? 'bg-bible-accent/10 text-bible-accent'
+                                    : src === 'en' ? 'bg-blue-50 text-blue-600'
+                                    : 'bg-emerald-50 text-emerald-600'
+                                  }`}
+                                >
+                                  {src === 'original' ? 'Original' : src === 'en' ? 'EN' : 'KR'}
+                                </span>
+                              ))}
+                            </span>
+                          </div>
+                          {result.matchedIn.includes('original') && (
+                            <p className={`text-sm leading-relaxed text-bible-ink line-clamp-2 ${resultRtl ? 'text-right' : ''} ${fontClass}`}>
+                              {result.text}
+                            </p>
+                          )}
+                          {result.matchedIn.includes('en') && result.englishText && (
+                            <p className="text-[12px] leading-relaxed text-blue-700/80 line-clamp-2 mt-0.5">
+                              <span className="text-[9px] font-bold text-blue-400 uppercase mr-1">EN</span>
+                              {result.englishText}
+                            </p>
+                          )}
+                          {result.matchedIn.includes('kr') && result.koreanText && (
+                            <p className="text-[12px] leading-relaxed text-emerald-700/80 font-kr line-clamp-2 mt-0.5">
+                              <span className="text-[9px] font-bold text-emerald-400 uppercase mr-1">KR</span>
+                              {result.koreanText}
+                            </p>
+                          )}
+                        </button>
+                      );
+                    })}
+                    {isSearching && (
+                      <div className="flex items-center justify-center py-4">
+                        <Loader2 className="w-4 h-4 animate-spin text-bible-muted mr-2" />
+                        <span className="text-[11px] text-bible-muted">Loading more results...</span>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -579,25 +867,48 @@ const BookSection: React.FC<{
 
 // ── Verse Display ───────────────────────────────────────────────────────
 
+/** Only fire callback on a clean click (no text selected) */
+function handleClickIfNoSelection(callback: () => void) {
+  return () => {
+    const selection = window.getSelection();
+    if (selection && selection.toString().length > 0) return;
+    callback();
+  };
+}
+
 const VerseItem: React.FC<{
   verse: Verse;
   language: Language;
   englishText?: string;
   koreanText?: string;
-}> = ({ verse, language, englishText, koreanText }) => {
+  originalFontSize: FontSizePreset;
+  translationFontSize: FontSizePreset;
+  onOriginalFontCycle: () => void;
+  onTranslationFontCycle: () => void;
+  isHighlighted?: boolean;
+}> = ({ verse, language, englishText, koreanText, originalFontSize, translationFontSize, onOriginalFontCycle, onTranslationFontCycle, isHighlighted }) => {
   const rtl = isRTL(language);
   const fontClass = language === 'HE' ? 'font-he' : language === 'AR' ? 'font-ar' : '';
+  const origSizeClass = rtl ? ORIGINAL_RTL_FONT_SIZES[originalFontSize] : ORIGINAL_FONT_SIZES[originalFontSize];
+  const transSizeClass = TRANSLATION_FONT_SIZES[translationFontSize];
 
   return (
-    <div className={`py-3 border-b border-bible-border/50 ${rtl ? 'text-right' : ''}`}>
+    <div
+      id={`verse-${verse.number}`}
+      className={`py-3 border-b border-bible-border/50 rounded-lg transition-all duration-700 ${rtl ? 'text-right' : ''} ${
+        isHighlighted ? 'bg-amber-50 border-amber-200 ring-2 ring-amber-300/50 shadow-md px-2 -mx-2' : ''
+      }`}
+    >
       {/* Verse number + original text */}
       <div className={`flex gap-2 ${rtl ? 'flex-row-reverse' : ''}`}>
         <span className="shrink-0 w-6 h-6 rounded-full bg-bible-accent flex items-center justify-center mt-1">
           <span className="text-[9px] font-bold text-white">{verse.number}</span>
         </span>
-        <p className={`font-serif text-base leading-[1.9] text-bible-ink flex-1 ${fontClass} ${
-          rtl ? 'text-xl leading-[2.2]' : ''
-        }`}>
+        <p
+          className={`font-serif text-bible-ink flex-1 cursor-pointer hover:bg-bible-surface/50 rounded-md transition-colors px-1 -mx-1 ${fontClass} ${origSizeClass}`}
+          onClick={handleClickIfNoSelection(onOriginalFontCycle)}
+          title={`Font size: ${FONT_SIZE_LABELS[originalFontSize]} — tap to change`}
+        >
           {verse.text}
         </p>
       </div>
@@ -606,17 +917,25 @@ const VerseItem: React.FC<{
       {(englishText || koreanText) && (
         <div className={`mt-2 space-y-1.5 ${rtl ? 'pr-8' : 'pl-8'}`}>
           {englishText && (
-            <div>
+            <div
+              className="cursor-pointer hover:bg-bible-surface/50 rounded-md transition-colors px-1 -mx-1"
+              onClick={handleClickIfNoSelection(onTranslationFontCycle)}
+              title={`Font size: ${FONT_SIZE_LABELS[translationFontSize]} — tap to change`}
+            >
               <span className="text-[9px] font-bold text-bible-secondary uppercase tracking-wider">EN</span>
-              <p className="text-[13px] leading-relaxed text-bible-muted">
+              <p className={`text-bible-muted ${transSizeClass}`}>
                 {englishText}
               </p>
             </div>
           )}
           {koreanText && (
-            <div>
+            <div
+              className="cursor-pointer hover:bg-bible-surface/50 rounded-md transition-colors px-1 -mx-1"
+              onClick={handleClickIfNoSelection(onTranslationFontCycle)}
+              title={`Font size: ${FONT_SIZE_LABELS[translationFontSize]} — tap to change`}
+            >
               <span className="text-[9px] font-bold text-bible-secondary uppercase tracking-wider">KR</span>
-              <p className="text-[13px] leading-relaxed text-bible-muted font-kr">
+              <p className={`text-bible-muted font-kr ${transSizeClass}`}>
                 {koreanText}
               </p>
             </div>
