@@ -94,6 +94,7 @@ interface SearchResult {
 interface ReadingProgress {
   bookNumber: number;
   chapter: number;
+  verseNumber?: number;
   timestamp: number;
 }
 
@@ -104,10 +105,11 @@ function loadProgress(): ReadingProgress | null {
   } catch { return null; }
 }
 
-function saveProgress(bookNumber: number, chapter: number) {
+function saveProgress(bookNumber: number, chapter: number, verseNumber?: number) {
   localStorage.setItem('lumina-progress', JSON.stringify({
     bookNumber,
     chapter,
+    verseNumber,
     timestamp: Date.now(),
   }));
 }
@@ -133,10 +135,21 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isBookPickerOpen, setIsBookPickerOpen] = useState(false);
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>(() => {
+    try {
+      const cached = localStorage.getItem('lumina-last-search-results');
+      return cached ? JSON.parse(cached) : [];
+    } catch { return []; }
+  });
+  const [lastSearchQuery, setLastSearchQuery] = useState(() => {
+    return localStorage.getItem('lumina-last-search-query') || '';
+  });
   const [isSearching, setIsSearching] = useState(false);
   const [searchDone, setSearchDone] = useState(false);
   const [highlightedVerse, setHighlightedVerse] = useState<number | null>(null);
+  const [currentVerseNumber, setCurrentVerseNumber] = useState<number | null>(
+    () => savedProgress.current?.verseNumber ?? null
+  );
 
   // Font size presets
   const [originalFontSize, setOriginalFontSize] = useState<FontSizePreset>(() => {
@@ -169,10 +182,33 @@ export default function App() {
   useEffect(() => { localStorage.setItem('lumina-orig-font', originalFontSize); }, [originalFontSize]);
   useEffect(() => { localStorage.setItem('lumina-trans-font', translationFontSize); }, [translationFontSize]);
 
-  // Save reading progress on navigation
+  // Save reading progress (debounced for verse tracking)
   useEffect(() => {
-    saveProgress(currentBookNumber, currentChapter);
-  }, [currentBookNumber, currentChapter]);
+    const timer = setTimeout(() => {
+      // Only update if we have meaningful data
+      if (currentVerseNumber !== null) {
+        saveProgress(currentBookNumber, currentChapter, currentVerseNumber);
+      } else {
+        // preserve existing verse if we don't have a new one yet
+        const existingRec = loadProgress();
+        if (existingRec?.bookNumber === currentBookNumber && existingRec?.chapter === currentChapter && existingRec?.verseNumber) {
+          // do nothing, let it stay
+        } else {
+          saveProgress(currentBookNumber, currentChapter);
+        }
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [currentBookNumber, currentChapter, currentVerseNumber]);
+
+  // Persistent Search Cache
+  useEffect(() => {
+    if (searchDone && searchQuery) {
+      localStorage.setItem('lumina-last-search-query', searchQuery);
+      localStorage.setItem('lumina-last-search-results', JSON.stringify(searchResults));
+      setLastSearchQuery(searchQuery);
+    }
+  }, [searchDone, searchQuery, searchResults]);
 
   // Load chapter data + both translations
   useEffect(() => {
@@ -210,6 +246,58 @@ export default function App() {
     return () => { cancelled = true; };
   }, [currentBook, currentChapter, showEnglish, showKorean]);
 
+  // Scroll to saved progress verse on initial load
+  const hasAutoScrolled = useRef(false);
+  useEffect(() => {
+    if (chapterData && !loading && savedProgress.current?.verseNumber && !hasAutoScrolled.current) {
+      if (savedProgress.current.bookNumber === currentBookNumber && savedProgress.current.chapter === currentChapter) {
+        const verseNum = savedProgress.current.verseNumber;
+        const timer = setTimeout(() => {
+          const el = document.getElementById(`verse-${verseNum}`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'auto', block: 'center' });
+            hasAutoScrolled.current = true;
+          }
+        }, 1000); // 1s is safer for full rendering + animations
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [chapterData, loading, currentBookNumber, currentChapter]);
+
+  // Intersection Observer for tracking currently seen verse
+  useEffect(() => {
+    if (loading || !chapterData) return;
+
+    // Small delay to ensure motion animations have started/settled
+    const timer = setTimeout(() => {
+      const observer = new IntersectionObserver(
+        (entries) => {
+          const visible = entries.filter(e => e.isIntersecting);
+          if (visible.length > 0) {
+            // Pick the one closest to the top-middle
+            const active = visible[0];
+            const verseMatch = active.target.id.match(/verse-(\d+)/);
+            if (verseMatch) {
+              setCurrentVerseNumber(parseInt(verseMatch[1], 10));
+            }
+          }
+        },
+        {
+          root: null, // viewport is more reliable for nested scrolls in many browsers
+          rootMargin: '-40% 0% -40% 0%', // focus on the middle 20%
+          threshold: 0
+        }
+      );
+
+      const elements = document.querySelectorAll('[id^="verse-"]');
+      elements.forEach(el => observer.observe(el));
+
+      return () => observer.disconnect();
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [loading, chapterData]);
+
   // Build verse-number → translation maps
   const kjvMap = useMemo(() => {
     if (!kjvData) return new Map<number, string>();
@@ -238,7 +326,14 @@ export default function App() {
       searchAbortRef.current = null;
     }
 
-    if (!searchQuery || searchQuery.length < 2) {
+    if (!searchQuery) {
+      // Don't clear searchResults here! Keep them for the "Previous Search" cache.
+      setIsSearching(false);
+      setSearchDone(false);
+      return;
+    }
+
+    if (searchQuery.length < 2) {
       setSearchResults([]);
       setIsSearching(false);
       setSearchDone(false);
@@ -341,7 +436,7 @@ export default function App() {
     setHighlightedVerse(result.verseNumber);
     setIsSearchOpen(false);
     setSearchQuery('');
-    setSearchResults([]);
+    // No longer clearing searchResults, so they persist in the "Previous Search" cache
     setSearchDone(false);
   }, []);
 
@@ -682,8 +777,34 @@ export default function App() {
 
             <div className="flex-1 overflow-y-auto">
               <div className="space-y-2">
-                {searchQuery.length < 2 ? (
+                {searchQuery.length < 2 && searchResults.length === 0 ? (
                   <p className="text-center text-bible-muted py-10 text-sm">Type at least 2 characters to search</p>
+                ) : (searchQuery.length < 2 && searchResults.length > 0) ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[10px] font-bold text-bible-secondary uppercase tracking-wider">Previous Search: "{lastSearchQuery}"</span>
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="h-6 text-[9px] text-bible-muted hover:text-bible-accent"
+                        onClick={() => {
+                          setSearchResults([]);
+                          setLastSearchQuery('');
+                          localStorage.removeItem('lumina-last-search-query');
+                          localStorage.removeItem('lumina-last-search-results');
+                        }}
+                      >
+                        Clear Cache
+                      </Button>
+                    </div>
+                    {searchResults.map((result, idx) => (
+                      <SearchResultCard 
+                        key={`${idx}`} 
+                        result={result} 
+                        onClick={() => handleSearchResultClick(result)} 
+                      />
+                    ))}
+                  </div>
                 ) : searchResults.length === 0 && isSearching ? (
                   <div className="flex items-center justify-center py-10">
                     <Loader2 className="w-5 h-5 animate-spin text-bible-muted" />
@@ -692,60 +813,13 @@ export default function App() {
                   <p className="text-center text-bible-muted py-10 text-sm">No results found</p>
                 ) : (
                   <>
-                    {searchResults.map((result, idx) => {
-                      const resultRtl = isRTL(result.language);
-                      const fontClass = result.language === 'HE' ? 'font-he' : result.language === 'AR' ? 'font-ar' : '';
-                      return (
-                        <button
-                          key={`${result.bookNumber}-${result.chapter}-${result.verseNumber}-${idx}`}
-                          onClick={() => handleSearchResultClick(result)}
-                          className="w-full text-left p-3 bg-white rounded-lg shadow-sm border border-black/5 hover:border-bible-accent/30 hover:shadow-md transition-all duration-200 active:scale-[0.98] cursor-pointer"
-                        >
-                          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                            <Badge variant="outline" className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0 shrink-0">
-                              {result.language}
-                            </Badge>
-                            <span className="text-[11px] font-bold text-bible-accent truncate">
-                              {result.bookName}
-                            </span>
-                            <span className="text-[10px] text-bible-muted shrink-0">
-                              {result.chapter}:{result.verseNumber}
-                            </span>
-                            <span className="flex gap-1 ml-auto shrink-0">
-                              {result.matchedIn.map(src => (
-                                <span
-                                  key={src}
-                                  className={`text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${
-                                    src === 'original' ? 'bg-bible-accent/10 text-bible-accent'
-                                    : src === 'en' ? 'bg-blue-50 text-blue-600'
-                                    : 'bg-emerald-50 text-emerald-600'
-                                  }`}
-                                >
-                                  {src === 'original' ? 'Original' : src === 'en' ? 'EN' : 'KR'}
-                                </span>
-                              ))}
-                            </span>
-                          </div>
-                          {result.matchedIn.includes('original') && (
-                            <p className={`text-sm leading-relaxed text-bible-ink line-clamp-2 ${resultRtl ? 'text-right' : ''} ${fontClass}`}>
-                              {result.text}
-                            </p>
-                          )}
-                          {result.matchedIn.includes('en') && result.englishText && (
-                            <p className="text-[12px] leading-relaxed text-blue-700/80 line-clamp-2 mt-0.5">
-                              <span className="text-[9px] font-bold text-blue-400 uppercase mr-1">EN</span>
-                              {result.englishText}
-                            </p>
-                          )}
-                          {result.matchedIn.includes('kr') && result.koreanText && (
-                            <p className="text-[12px] leading-relaxed text-emerald-700/80 font-kr line-clamp-2 mt-0.5">
-                              <span className="text-[9px] font-bold text-emerald-400 uppercase mr-1">KR</span>
-                              {result.koreanText}
-                            </p>
-                          )}
-                        </button>
-                      );
-                    })}
+                    {searchResults.map((result, idx) => (
+                      <SearchResultCard 
+                        key={`${result.bookNumber}-${result.chapter}-${result.verseNumber}-${idx}`} 
+                        result={result} 
+                        onClick={() => handleSearchResultClick(result)} 
+                      />
+                    ))}
                     {isSearching && (
                       <div className="flex items-center justify-center py-4">
                         <Loader2 className="w-4 h-4 animate-spin text-bible-muted mr-2" />
@@ -827,6 +901,66 @@ export default function App() {
     </div>
   );
 }
+
+// ── Search UI Components ───────────────────────────────────────────────
+
+const SearchResultCard: React.FC<{
+  result: SearchResult;
+  onClick: () => void;
+}> = ({ result, onClick }) => {
+  const resultRtl = isRTL(result.language);
+  const fontClass = result.language === 'HE' ? 'font-he' : result.language === 'AR' ? 'font-ar' : '';
+  
+  return (
+    <button
+      onClick={onClick}
+      className="w-full text-left p-3 bg-white rounded-lg shadow-sm border border-black/5 hover:border-bible-accent/30 hover:shadow-md transition-all duration-200 active:scale-[0.98] cursor-pointer"
+    >
+      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+        <Badge variant="outline" className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0 shrink-0">
+          {result.language}
+        </Badge>
+        <span className="text-[11px] font-bold text-bible-accent truncate">
+          {result.bookName}
+        </span>
+        <span className="text-[10px] text-bible-muted shrink-0">
+          {result.chapter}:{result.verseNumber}
+        </span>
+        <span className="flex gap-1 ml-auto shrink-0">
+          {result.matchedIn.map(src => (
+            <span
+              key={src}
+              className={`text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${
+                src === 'original' ? 'bg-bible-accent/10 text-bible-accent'
+                : src === 'en' ? 'bg-blue-50 text-blue-600'
+                : 'bg-emerald-50 text-emerald-600'
+              }`}
+            >
+              {src === 'original' ? 'Original' : src === 'en' ? 'EN' : 'KR'}
+            </span>
+          ))}
+        </span>
+      </div>
+      {result.matchedIn.includes('original') && (
+        <p className={`text-sm leading-relaxed text-bible-ink line-clamp-2 ${resultRtl ? 'text-right' : ''} ${fontClass}`}>
+          {result.text}
+        </p>
+      )}
+      {result.matchedIn.includes('en') && result.englishText && (
+        <p className="text-[12px] leading-relaxed text-blue-700/80 line-clamp-2 mt-0.5">
+          <span className="text-[9px] font-bold text-blue-400 uppercase mr-1">EN</span>
+          {result.englishText}
+        </p>
+      )}
+      {result.matchedIn.includes('kr') && result.koreanText && (
+        <p className="text-[12px] leading-relaxed text-emerald-700/80 font-kr line-clamp-2 mt-0.5">
+          <span className="text-[9px] font-bold text-emerald-400 uppercase mr-1">KR</span>
+          {result.koreanText}
+        </p>
+      )}
+    </button>
+  );
+};
 
 // ── Book Section in Picker ──────────────────────────────────────────────
 
