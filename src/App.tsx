@@ -175,7 +175,7 @@ export default function App() {
     return (localStorage.getItem('lumina-theme') as 'light' | 'theme-dark' | 'theme-sepia') || 'light';
   });
 
-  // ── Theme color maps (runtime override via inline CSS vars) ──────────────
+  // ── Theme color maps ──────────────
   const THEMES = {
     light: {
       '--color-bible-bg':         '#FFFFFF',
@@ -214,18 +214,12 @@ export default function App() {
 
   const themeStyle = THEMES[theme] as React.CSSProperties;
 
-  // Apply theme class to <html> so CSS variables cascade to all portals/overlays
   useEffect(() => {
     const root = document.documentElement;
     root.classList.remove('theme-dark', 'theme-sepia');
     if (theme === 'theme-dark') root.classList.add('theme-dark');
     else if (theme === 'theme-sepia') root.classList.add('theme-sepia');
-  }, [theme]);
-
-  // Also apply data-theme to document root for CSS variable overrides
-  useEffect(() => {
-    const themeValue = theme === 'theme-dark' ? 'dark' : theme === 'theme-sepia' ? 'sepia' : 'light';
-    document.documentElement.dataset.theme = themeValue;
+    document.documentElement.dataset.theme = theme === 'theme-dark' ? 'dark' : theme === 'theme-sepia' ? 'sepia' : 'light';
   }, [theme]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -245,26 +239,14 @@ export default function App() {
   useEffect(() => { localStorage.setItem('lumina-orig-font', originalFontSize); }, [originalFontSize]);
   useEffect(() => { localStorage.setItem('lumina-trans-font', translationFontSize); }, [translationFontSize]);
 
-  // Save reading progress (debounced for verse tracking)
   useEffect(() => {
     const timer = setTimeout(() => {
-      // Only update if we have meaningful data
-      if (currentVerseNumber !== null) {
-        saveProgress(currentBookNumber, currentChapter, currentVerseNumber);
-      } else {
-        // preserve existing verse if we don't have a new one yet
-        const existingRec = loadProgress();
-        if (existingRec?.bookNumber === currentBookNumber && existingRec?.chapter === currentChapter && existingRec?.verseNumber) {
-          // do nothing, let it stay
-        } else {
-          saveProgress(currentBookNumber, currentChapter);
-        }
-      }
+      if (currentVerseNumber !== null) saveProgress(currentBookNumber, currentChapter, currentVerseNumber);
+      else saveProgress(currentBookNumber, currentChapter);
     }, 500);
     return () => clearTimeout(timer);
   }, [currentBookNumber, currentChapter, currentVerseNumber]);
 
-  // Persistent Search Cache
   useEffect(() => {
     if (searchDone && searchQuery) {
       localStorage.setItem('lumina-last-search-query', searchQuery);
@@ -273,97 +255,30 @@ export default function App() {
     }
   }, [searchDone, searchQuery, searchResults]);
 
-  // Load chapter data + both translations
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-
     const isKoreanOn = showKorean || (!showOriginal && !showEnglish && !showKorean);
-
     const promises: [Promise<ChapterData>, Promise<ChapterData | null>, Promise<ChapterData | null>] = [
       bibleService.getChapter(currentBook, currentChapter),
-      showEnglish
-        ? bibleService.getTranslation('kjv', currentBook.number, currentChapter)
-        : Promise.resolve(null),
-      isKoreanOn
-        ? bibleService.getTranslation('krv', currentBook.number, currentChapter)
-        : Promise.resolve(null),
+      showEnglish ? bibleService.getTranslation('kjv', currentBook.number, currentChapter) : Promise.resolve(null),
+      isKoreanOn ? bibleService.getTranslation('krv', currentBook.number, currentChapter) : Promise.resolve(null),
     ];
-
-    Promise.all(promises)
-      .then(([original, kjv, krv]) => {
-        if (!cancelled) {
-          setChapterData(original);
-          setKjvData(kjv);
-          setKrvData(krv);
-          setLoading(false);
-          scrollRef.current?.scrollTo(0, 0);
-        }
-      })
-      .catch(err => {
-        if (!cancelled) {
-          setError(err.message);
-          setLoading(false);
-        }
-      });
-
+    Promise.all(promises).then(([original, kjv, krv]) => {
+      if (!cancelled) {
+        setChapterData(original);
+        setKjvData(kjv);
+        setKrvData(krv);
+        setLoading(false);
+        scrollRef.current?.scrollTo(0, 0);
+      }
+    }).catch(err => {
+      if (!cancelled) { setError(err.message); setLoading(false); }
+    });
     return () => { cancelled = true; };
   }, [currentBook, currentChapter, showEnglish, showKorean, showOriginal]);
 
-  // Scroll to saved progress verse on initial load
-  const hasAutoScrolled = useRef(false);
-  useEffect(() => {
-    if (chapterData && !loading && savedProgress.current?.verseNumber && !hasAutoScrolled.current) {
-      if (savedProgress.current.bookNumber === currentBookNumber && savedProgress.current.chapter === currentChapter) {
-        const verseNum = savedProgress.current.verseNumber;
-        const timer = setTimeout(() => {
-          const el = document.getElementById(`verse-${verseNum}`);
-          if (el) {
-            el.scrollIntoView({ behavior: 'auto', block: 'center' });
-            hasAutoScrolled.current = true;
-          }
-        }, 1000); // 1s is safer for full rendering + animations
-        return () => clearTimeout(timer);
-      }
-    }
-  }, [chapterData, loading, currentBookNumber, currentChapter]);
-
-  // Intersection Observer for tracking currently seen verse
-  useEffect(() => {
-    if (loading || !chapterData) return;
-
-    // Small delay to ensure motion animations have started/settled
-    const timer = setTimeout(() => {
-      const observer = new IntersectionObserver(
-        (entries) => {
-          const visible = entries.filter(e => e.isIntersecting);
-          if (visible.length > 0) {
-            // Pick the one closest to the top-middle
-            const active = visible[0];
-            const verseMatch = active.target.id.match(/verse-(\d+)/);
-            if (verseMatch) {
-              setCurrentVerseNumber(parseInt(verseMatch[1], 10));
-            }
-          }
-        },
-        {
-          root: null, // viewport is more reliable for nested scrolls in many browsers
-          rootMargin: '-40% 0% -40% 0%', // focus on the middle 20%
-          threshold: 0
-        }
-      );
-
-      const elements = document.querySelectorAll('[id^="verse-"]');
-      elements.forEach(el => observer.observe(el));
-
-      return () => observer.disconnect();
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, [loading, chapterData]);
-
-  // Build verse-number → translation maps
   const kjvMap = useMemo(() => {
     if (!kjvData) return new Map<number, string>();
     return new Map(kjvData.verses.map(v => [v.number, v.text]));
@@ -374,128 +289,72 @@ export default function App() {
     return new Map(krvData.verses.map(v => [v.number, v.text]));
   }, [krvData]);
 
-  const filteredVerses = useMemo(() => {
-    if (!chapterData) return [];
-    return chapterData.verses;
-  }, [chapterData]);
-
-  // Language visibility with fallback (Show Korean if all are off)
   const isOriginalOn = showOriginal;
   const isEnglishOn = showEnglish;
   const isKoreanOn = showKorean || (!showOriginal && !showEnglish && !showKorean);
 
-  // Global search across all books — streams results progressively
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    // Cancel any in-progress search
-    if (searchAbortRef.current) {
-      searchAbortRef.current.abort();
-      searchAbortRef.current = null;
-    }
-
-    if (!searchQuery) {
-      // Don't clear searchResults here! Keep them for the "Previous Search" cache.
+    if (searchAbortRef.current) searchAbortRef.current.abort();
+    if (!searchQuery || searchQuery.length < 2) {
+      if (searchQuery.length < 2) setSearchResults([]);
       setIsSearching(false);
       setSearchDone(false);
       return;
     }
-
-    if (searchQuery.length < 2) {
-      setSearchResults([]);
-      setIsSearching(false);
-      setSearchDone(false);
-      return;
-    }
-
     setIsSearching(true);
     setSearchDone(false);
     setSearchResults([]);
-
-    if (searchTimerRef.current) {
-      clearTimeout(searchTimerRef.current);
-    }
-
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(async () => {
       const abortCtrl = new AbortController();
       searchAbortRef.current = abortCtrl;
       const query = searchQuery.toLowerCase();
       let batch: SearchResult[] = [];
-
       for (const book of BIBLE_BOOKS) {
         if (abortCtrl.signal.aborted) return;
-
         for (let ch = 1; ch <= book.chapters; ch++) {
           if (abortCtrl.signal.aborted) return;
-
           try {
             const [originalData, kjvChapter, krvChapter] = await Promise.all([
               bibleService.getChapter(book, ch).catch(() => null),
               bibleService.getTranslation('kjv', book.number, ch).catch(() => null),
               bibleService.getTranslation('krv', book.number, ch).catch(() => null),
             ]);
-
             if (!originalData || abortCtrl.signal.aborted) continue;
-
-            const kjvVerseMap = new Map<number, string>();
-            const krvVerseMap = new Map<number, string>();
-            if (kjvChapter) kjvChapter.verses.forEach(v => kjvVerseMap.set(v.number, v.text));
-            if (krvChapter) krvChapter.verses.forEach(v => krvVerseMap.set(v.number, v.text));
-
+            const kjvVM = new Map(); const krvVM = new Map();
+            if (kjvChapter) kjvChapter.verses.forEach(v => kjvVM.set(v.number, v.text));
+            if (krvChapter) krvChapter.verses.forEach(v => krvVM.set(v.number, v.text));
             for (const verse of originalData.verses) {
-              const enText = kjvVerseMap.get(verse.number);
-              const krText = krvVerseMap.get(verse.number);
-
+              const enText = kjvVM.get(verse.number); const krText = krvVM.get(verse.number);
               const matchedIn: MatchSource[] = [];
               if (verse.text.toLowerCase().includes(query)) matchedIn.push('original');
               if (enText && enText.toLowerCase().includes(query)) matchedIn.push('en');
               if (krText && krText.toLowerCase().includes(query)) matchedIn.push('kr');
-
               if (matchedIn.length > 0) {
                 batch.push({
-                  bookNumber: book.number,
-                  bookName: book.nameEn,
-                  chapter: ch,
-                  verseNumber: verse.number,
-                  text: verse.text,
-                  language: book.language,
-                  matchedIn,
-                  englishText: enText,
-                  koreanText: krText,
+                  bookNumber: book.number, bookName: book.nameEn, chapter: ch, verseNumber: verse.number,
+                  text: verse.text, language: book.language, matchedIn, englishText: enText, koreanText: krText,
                 });
               }
             }
-
-            // Flush batch every chapter to stream results to UI
             if (batch.length > 0 && !abortCtrl.signal.aborted) {
-              const toFlush = batch;
-              batch = [];
+              const toFlush = batch; batch = [];
               setSearchResults(prev => [...prev, ...toFlush]);
-              setIsSearching(true); // still searching
             }
-          } catch {
-            // Chapter not available, skip
-          }
+          } catch {}
         }
       }
-
       if (!abortCtrl.signal.aborted) {
-        if (batch.length > 0) {
-          setSearchResults(prev => [...prev, ...batch]);
-        }
-        setIsSearching(false);
-        setSearchDone(true);
+        if (batch.length > 0) setSearchResults(prev => [...prev, ...batch]);
+        setIsSearching(false); setSearchDone(true);
       }
     }, 400);
-
     return () => {
-      if (searchTimerRef.current) {
-        clearTimeout(searchTimerRef.current);
-      }
-      if (searchAbortRef.current) {
-        searchAbortRef.current.abort();
-      }
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+      if (searchAbortRef.current) searchAbortRef.current.abort();
     };
   }, [searchQuery]);
 
@@ -505,53 +364,32 @@ export default function App() {
     setHighlightedVerse(result.verseNumber);
     setIsSearchOpen(false);
     setSearchQuery('');
-    // No longer clearing searchResults, so they persist in the "Previous Search" cache
     setSearchDone(false);
   }, []);
 
-  // Scroll to highlighted verse after chapter loads
   useEffect(() => {
     if (highlightedVerse !== null && !loading && chapterData) {
-      const timer = setTimeout(() => {
+      setTimeout(() => {
         const el = document.getElementById(`verse-${highlightedVerse}`);
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 350); // wait for animation
-
-      // Clear highlight after 3 seconds
-      const clearTimer = setTimeout(() => {
-        setHighlightedVerse(null);
-      }, 3500);
-
-      return () => {
-        clearTimeout(timer);
-        clearTimeout(clearTimer);
-      };
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 350);
+      setTimeout(() => setHighlightedVerse(null), 3500);
     }
   }, [highlightedVerse, loading, chapterData]);
 
   const handleNextChapter = useCallback(() => {
-    if (currentChapter < currentBook.chapters) {
-      setCurrentChapter(prev => prev + 1);
-    } else {
+    if (currentChapter < currentBook.chapters) setCurrentChapter(prev => prev + 1);
+    else {
       const nextBook = BIBLE_BOOKS.find(b => b.number === currentBookNumber + 1);
-      if (nextBook) {
-        setCurrentBookNumber(nextBook.number);
-        setCurrentChapter(1);
-      }
+      if (nextBook) { setCurrentBookNumber(nextBook.number); setCurrentChapter(1); }
     }
   }, [currentChapter, currentBook, currentBookNumber]);
 
   const handlePrevChapter = useCallback(() => {
-    if (currentChapter > 1) {
-      setCurrentChapter(prev => prev - 1);
-    } else {
+    if (currentChapter > 1) setCurrentChapter(prev => prev - 1);
+    else {
       const prevBook = BIBLE_BOOKS.find(b => b.number === currentBookNumber - 1);
-      if (prevBook) {
-        setCurrentBookNumber(prevBook.number);
-        setCurrentChapter(prevBook.chapters);
-      }
+      if (prevBook) { setCurrentBookNumber(prevBook.number); setCurrentChapter(prevBook.chapters); }
     }
   }, [currentChapter, currentBookNumber]);
 
@@ -561,584 +399,202 @@ export default function App() {
     setIsBookPickerOpen(false);
   }, []);
 
+  const totalChapters = BIBLE_BOOKS.reduce((sum, b) => sum + b.chapters, 0);
+  const chaptersRead = BIBLE_BOOKS.filter(b => b.number < currentBookNumber).reduce((sum, b) => sum + b.chapters, 0) + currentChapter;
+  const progressPercent = Math.round((chaptersRead / totalChapters) * 100);
+
   const isFirstChapter = currentBookNumber === 1 && currentChapter === 1;
   const isLastChapter = currentBookNumber === 66 && currentChapter === currentBook.chapters;
 
-  // Reading progress percentage
-  const totalChapters = BIBLE_BOOKS.reduce((sum, b) => sum + b.chapters, 0);
-  const chaptersRead = BIBLE_BOOKS
-    .filter(b => b.number < currentBookNumber)
-    .reduce((sum, b) => sum + b.chapters, 0) + currentChapter;
-  const progressPercent = Math.round((chaptersRead / totalChapters) * 100);
-
   return (
-    <div
-      className="flex flex-col h-screen max-w-[420px] mx-auto border-x shadow-2xl relative overflow-hidden"
-      style={{
-        ...themeStyle,
-        paddingTop: 'env(safe-area-inset-top)',
-        paddingBottom: 'env(safe-area-inset-bottom)',
-      }}
-      data-theme={theme}
-    >
+    <div className="flex h-screen w-full bg-bible-bg overflow-hidden" data-theme={theme} style={themeStyle}>
       <style>{`
         [data-theme="theme-dark"] { background-color: #1A1A1A; color: #E0E0E0; }
         [data-theme="theme-sepia"] { background-color: #F4ECD8; color: #433422; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: var(--color-bible-border); border-radius: 10px; }
       `}</style>
-      {/* Header */}
-      <header className="shrink-0 p-4 pb-3 border-b border-bible-border bg-bible-bg z-10 space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <BookIcon className="w-5 h-5 text-bible-accent" />
-            <h1 className="font-sans text-lg font-bold tracking-tight">Lumina</h1>
+
+      {/* ── Sidebar (Desktop/iPad) ── */}
+      <aside className="hidden md:flex flex-col w-80 shrink-0 border-r border-bible-border bg-bible-bg z-20">
+        <div className="p-4 border-b border-bible-border flex items-center gap-2 px-6">
+          <BookIcon className="w-5 h-5 text-bible-accent" />
+          <h1 className="font-sans text-lg font-bold tracking-tight text-bible-ink">Lumina</h1>
+        </div>
+        <div className="flex-1 overflow-hidden">
+          <CompactBookPicker currentBookNumber={currentBookNumber} onSelect={selectBook} />
+        </div>
+        <div className="p-5 border-t border-bible-border bg-bible-surface/30">
+          <div className="flex items-center justify-between mb-3 px-1">
+            <span className="text-[10px] font-extrabold text-bible-secondary uppercase tracking-widest">Chapters</span>
+            <span className="text-[10px] font-bold text-bible-muted">{currentBook.nameKr}</span>
           </div>
-          <div className="flex items-center gap-1">
-            <Badge 
-              variant={showOriginal ? "default" : "outline"} 
-              className={`text-[10px] font-bold uppercase tracking-wider cursor-pointer transition-all duration-300 ${
-                showOriginal 
-                  ? 'bg-bible-accent text-white border-transparent hover:bg-bible-accent/90' 
-                  : 'text-bible-muted border-bible-border hover:bg-bible-surface bg-transparent'
-              }`}
-              onClick={() => setShowOriginal(!showOriginal)}
-              title={showOriginal ? "Hide Original Script" : "Show Original Script"}
-            >
-              {LANGUAGE_LABELS[currentBook.language]}
-            </Badge>
-            <Sheet>
-              <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" className="text-bible-muted h-8 w-8">
-                  <Settings className="w-4 h-4" />
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="right" className="w-[300px] bg-bible-bg px-6">
-                <SheetHeader className="px-0">
-                  <SheetTitle className="font-sans text-xl font-bold">Settings</SheetTitle>
-                </SheetHeader>
-                <div className="py-6 space-y-6">
-                  {/* Language Learning */}
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-extrabold text-bible-secondary uppercase tracking-[2px]">
-                      Language Learning
-                    </label>
-                    <p className="text-[10px] text-bible-muted leading-tight">
-                      Show translations below the original scriptures. Enable both to learn Korean↔English.
-                    </p>
-
-                    <div className="space-y-2">
-                      <button
-                        onClick={() => setShowEnglish(!showEnglish)}
-                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors ${
-                          showEnglish
-                            ? 'border-bible-accent bg-bible-accent/10'
-                            : 'border-bible-border bg-bible-surface'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Languages className="w-4 h-4" />
-                          <span className="text-[12px] font-bold">English (KJV)</span>
-                        </div>
-                        <span className={`text-[10px] font-bold uppercase ${showEnglish ? 'text-bible-accent' : 'text-bible-muted'}`}>
-                          {showEnglish ? 'ON' : 'OFF'}
-                        </span>
-                      </button>
-
-                      <button
-                        onClick={() => setShowKorean(!showKorean)}
-                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors ${
-                          showKorean
-                            ? 'border-bible-accent bg-bible-accent/10'
-                            : 'border-bible-border bg-bible-surface'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Languages className="w-4 h-4" />
-                          <span className="text-[12px] font-bold">한국어 (개역한글)</span>
-                        </div>
-                        <span className={`text-[10px] font-bold uppercase ${showKorean ? 'text-bible-accent' : 'text-bible-muted'}`}>
-                          {showKorean ? 'ON' : 'OFF'}
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <Separator className="bg-bible-border" />
-
-                  {/* Theme & Display */}
-                  <div className="space-y-4">
-                    <label className="text-[10px] font-extrabold text-bible-secondary uppercase tracking-[2px]">
-                      Theme & Display
-                    </label>
-                    <div className="space-y-2">
-                       {/* Dark Mode */}
-                       <button
-                        onClick={() => setTheme(prev => prev === 'theme-dark' ? 'light' : 'theme-dark')}
-                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors ${
-                          theme === 'theme-dark'
-                            ? 'border-bible-accent bg-bible-accent/20 text-bible-ink'
-                            : 'border-bible-border bg-bible-surface text-bible-ink'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Moon className="w-4 h-4" />
-                          <span className="text-[12px] font-bold">Dark Mode</span>
-                        </div>
-                        <span className={`text-[10px] font-bold uppercase ${theme === 'theme-dark' ? 'text-bible-accent' : 'text-bible-muted'}`}>
-                          {theme === 'theme-dark' ? 'ON' : 'OFF'}
-                        </span>
-                      </button>
-
-                      {/* Eye-Health Mode */}
-                      <button
-                        onClick={() => setTheme(prev => prev === 'theme-sepia' ? 'light' : 'theme-sepia')}
-                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg border transition-colors ${
-                          theme === 'theme-sepia'
-                            ? 'border-bible-accent bg-bible-accent/20 text-bible-ink'
-                            : 'border-bible-border bg-bible-surface text-bible-ink'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <Eye className="w-4 h-4" />
-                          <span className="text-[12px] font-bold">Eye-Health (Sepia)</span>
-                        </div>
-                        <span className={`text-[10px] font-bold uppercase ${theme === 'theme-sepia' ? 'text-bible-accent' : 'text-bible-muted'}`}>
-                          {theme === 'theme-sepia' ? 'ON' : 'OFF'}
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <Separator className="bg-bible-border" />
-
-                  {/* Reading Progress */}
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-extrabold text-bible-secondary uppercase tracking-[2px]">
-                      Reading Progress
-                    </label>
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[12px] font-medium text-bible-ink">
-                          {currentBook.nameEn} Ch. {currentChapter}
-                        </span>
-                        <span className="text-[12px] font-bold text-bible-accent">{progressPercent}%</span>
-                      </div>
-                      <div className="w-full h-2 bg-bible-surface rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-bible-accent rounded-full transition-all duration-500"
-                          style={{ width: `${progressPercent}%` }}
-                        />
-                      </div>
-                      <p className="text-[10px] text-bible-muted">
-                        {chaptersRead} of {totalChapters} chapters
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </SheetContent>
-            </Sheet>
-          </div>
-        </div>
-
-        <div
-          className="bg-bible-surface rounded-[10px] px-3 py-2 flex items-center gap-2 cursor-pointer"
-          onClick={() => setIsSearchOpen(true)}
-        >
-          <Search className="w-4 h-4 text-bible-muted" />
-          <span className="text-sm text-bible-muted">Search Scriptures...</span>
-        </div>
-
-        {/* Testament / Language pills */}
-        <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
-          {(['OT-HE', 'OT-AR', 'NT-GR'] as const).map(key => {
-            const [testament, lang] = key.split('-') as ['OT' | 'NT', Language];
-            const isActive = currentBook.testament === testament && currentBook.language === lang;
-            const label = testament === 'OT' && lang === 'HE' ? 'Torah & History'
-              : testament === 'OT' && lang === 'AR' ? 'Poetry & Prophets'
-              : 'New Testament';
-            return (
-              <button
-                key={key}
-                onClick={() => {
-                  const firstBook = BIBLE_BOOKS.find(b => b.testament === testament && b.language === lang);
-                  if (firstBook) selectBook(firstBook);
-                }}
-                className={`px-3 py-1.5 rounded-full text-[11px] font-bold tracking-[0.5px] transition-colors whitespace-nowrap border border-transparent ${
-                  isActive
-                    ? 'bg-bible-accent text-white'
-                    : 'bg-bible-surface text-bible-muted'
-                }`}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      </header>
-
-      {/* Navigation Bar */}
-      <div className="shrink-0 px-5 py-3 bg-bible-bg border-b border-bible-border">
-        <button
-          onClick={() => setIsBookPickerOpen(true)}
-          className="flex items-center gap-1 mb-1"
-        >
-          <span className="text-[12px] font-bold text-bible-secondary uppercase tracking-[2px]">
-            {currentBook.nameEn}
-          </span>
-          <ChevronDown className="w-3 h-3 text-bible-secondary" />
-        </button>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <h2 className={`font-serif text-2xl text-bible-ink ${rtl ? 'font-he' : ''}`}>
-              {rtl ? currentBook.nameOriginal : `Chapter ${currentChapter}`}
-            </h2>
-            {rtl && (
-              <span className="text-sm text-bible-muted">Ch. {currentChapter}</span>
-            )}
-          </div>
-          <div className="flex gap-1">
-            <Button variant="ghost" size="icon" onClick={handlePrevChapter} disabled={isFirstChapter} className="text-bible-muted">
-              <ChevronLeft className="w-5 h-5" />
-            </Button>
-            <Button variant="ghost" size="icon" onClick={handleNextChapter} disabled={isLastChapter} className="text-bible-muted">
-              <ChevronRight className="w-5 h-5" />
-            </Button>
-          </div>
-        </div>
-        {/* Progress bar under nav */}
-        <div className="mt-2 w-full h-[2px] bg-bible-surface rounded-full overflow-hidden">
-          <div
-            className="h-full bg-bible-accent/40 rounded-full transition-all duration-300"
-            style={{ width: `${(currentChapter / currentBook.chapters) * 100}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto min-h-0 px-5 py-4">
-        <AnimatePresence mode="wait">
-          {loading ? (
-            <motion.div
-              key="loading"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="flex items-center justify-center py-20"
-            >
-              <Loader2 className="w-6 h-6 animate-spin text-bible-muted" />
-            </motion.div>
-          ) : error ? (
-            <motion.div
-              key="error"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="flex flex-col items-center justify-center py-20 gap-3"
-            >
-              <p className="text-sm text-bible-muted text-center">
-                Chapter data not available yet.
-              </p>
-              <p className="text-xs text-bible-muted text-center">
-                Run <code className="bg-bible-surface px-1.5 py-0.5 rounded">npx tsx scripts/download-bible.ts</code> to download.
-              </p>
-            </motion.div>
-          ) : (
-            <motion.div
-              key={`${currentBookNumber}-${currentChapter}`}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.3 }}
-              className="space-y-1 pb-4"
-            >
-              {filteredVerses.map(verse => (
-                <VerseItem
-                  key={verse.number}
-                  verse={verse}
-                  language={currentBook.language}
-                  showOriginal={isOriginalOn}
-                  englishText={isEnglishOn ? kjvMap.get(verse.number) : undefined}
-                  koreanText={isKoreanOn ? krvMap.get(verse.number) : undefined}
-                  originalFontSize={originalFontSize}
-                  translationFontSize={translationFontSize}
-                  onOriginalFontCycle={() => setOriginalFontSize(prev => nextFontSize(prev))}
-                  onTranslationFontCycle={() => setTranslationFontSize(prev => nextFontSize(prev))}
-                  isHighlighted={highlightedVerse === verse.number}
-                />
-              ))}
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* Search Overlay */}
-      <AnimatePresence>
-        {isSearchOpen && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="absolute inset-0 z-50 bg-bible-bg p-4 pt-[env(safe-area-inset-top)] flex flex-col"
-          >
-            <div className="flex items-center gap-2 mb-3">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bible-muted" />
-                <Input
-                  autoFocus
-                  placeholder="Search across all scriptures..."
-                  className="pl-10 bg-bible-surface border-none shadow-sm"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-              </div>
-              <Button variant="ghost" size="icon" onClick={() => {
-                setIsSearchOpen(false);
-                setSearchQuery('');
-                setSearchResults([]);
-              }}>
-                <X className="w-5 h-5" />
-              </Button>
-            </div>
-
-            {searchQuery.length >= 2 && (
-              <div className="mb-3 flex items-center gap-2">
-                <span className="text-[10px] font-bold text-bible-secondary uppercase tracking-wider">
-                  {isSearching
-                    ? `Searching... (${searchResults.length} found so far)`
-                    : `${searchResults.length} result${searchResults.length !== 1 ? 's' : ''} found`}
-                </span>
-                {isSearching && (
-                  <Loader2 className="w-3 h-3 animate-spin text-bible-muted" />
-                )}
-              </div>
-            )}
-
-            <div className="flex-1 overflow-y-auto">
-              <div className="space-y-2">
-                {searchQuery.length < 2 && searchResults.length === 0 ? (
-                  <p className="text-center text-bible-muted py-10 text-sm">Type at least 2 characters to search</p>
-                ) : (searchQuery.length < 2 && searchResults.length > 0) ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] font-bold text-bible-secondary uppercase tracking-wider">Previous Search: "{lastSearchQuery}"</span>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="h-6 text-[9px] text-bible-muted hover:text-bible-accent"
-                        onClick={() => {
-                          setSearchResults([]);
-                          setLastSearchQuery('');
-                          localStorage.removeItem('lumina-last-search-query');
-                          localStorage.removeItem('lumina-last-search-results');
-                        }}
-                      >
-                        Clear Cache
-                      </Button>
-                    </div>
-                    {searchResults.map((result, idx) => (
-                      <SearchResultCard 
-                        key={`${idx}`} 
-                        result={result} 
-                        onClick={() => handleSearchResultClick(result)} 
-                      />
-                    ))}
-                  </div>
-                ) : searchResults.length === 0 && isSearching ? (
-                  <div className="flex items-center justify-center py-10">
-                    <Loader2 className="w-5 h-5 animate-spin text-bible-muted" />
-                  </div>
-                ) : searchResults.length === 0 && searchDone ? (
-                  <p className="text-center text-bible-muted py-10 text-sm">No results found</p>
-                ) : (
-                  <>
-                    {searchResults.map((result, idx) => (
-                      <SearchResultCard 
-                        key={`${result.bookNumber}-${result.chapter}-${result.verseNumber}-${idx}`} 
-                        result={result} 
-                        onClick={() => handleSearchResultClick(result)} 
-                      />
-                    ))}
-                    {isSearching && (
-                      <div className="flex items-center justify-center py-4">
-                        <Loader2 className="w-4 h-4 animate-spin text-bible-muted mr-2" />
-                        <span className="text-[11px] text-bible-muted">Loading more results...</span>
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Book Picker Overlay */}
-      <AnimatePresence>
-        {isBookPickerOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-            className="absolute inset-0 z-50 bg-bible-bg pt-[env(safe-area-inset-top)] flex flex-col"
-          >
-            <div className="shrink-0 flex items-center justify-between p-5 border-b border-bible-border">
-              <h2 className="font-sans text-lg font-bold">Select Book</h2>
-              <Button variant="ghost" size="icon" onClick={() => setIsBookPickerOpen(false)}>
-                <X className="w-5 h-5" />
-              </Button>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              <div className="p-5 space-y-6">
-                <BookSection
-                  title="Torah & Historical Books"
-                  subtitle="עברית — Hebrew (Aleppo Codex)"
-                  books={BIBLE_BOOKS.filter(b => b.language === 'HE')}
-                  currentBookNumber={currentBookNumber}
-                  onSelect={selectBook}
-                />
-                <BookSection
-                  title="Poetry & Prophets"
-                  subtitle="العربية — Arabic (Smith & Van Dyck)"
-                  books={BIBLE_BOOKS.filter(b => b.language === 'AR')}
-                  currentBookNumber={currentBookNumber}
-                  onSelect={selectBook}
-                />
-                <BookSection
-                  title="New Testament"
-                  subtitle="Ελληνικά — Greek (Textus Receptus)"
-                  books={BIBLE_BOOKS.filter(b => b.language === 'GR')}
-                  currentBookNumber={currentBookNumber}
-                  onSelect={selectBook}
-                />
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Chapter Picker Bar */}
-      <div className="shrink-0 border-t border-bible-border bg-bible-bg">
-        <div className="px-3 py-2 overflow-x-auto">
-          <div className="flex gap-1">
+          <div className="grid grid-cols-5 gap-1.5 h-32 overflow-y-auto pr-1 custom-scrollbar">
             {Array.from({ length: currentBook.chapters }, (_, i) => i + 1).map(ch => (
-              <button
-                key={ch}
-                onClick={() => setCurrentChapter(ch)}
-                className={`min-w-[36px] h-9 rounded-lg text-xs font-bold transition-colors shrink-0 ${
-                  currentChapter === ch
-                    ? 'bg-bible-accent text-white'
-                    : 'bg-bible-surface text-bible-muted hover:bg-bible-border'
-                }`}
-              >
-                {ch}
-              </button>
+              <button key={ch} onClick={() => setCurrentChapter(ch)} className={`h-9 flex items-center justify-center rounded-lg text-xs font-bold transition-all ${currentChapter === ch ? 'bg-bible-accent text-white shadow-sm' : 'bg-bible-bg text-bible-muted hover:bg-bible-border'}`}>{ch}</button>
             ))}
           </div>
         </div>
-      </div>
+      </aside>
+
+      {/* ── Main Content Area ── */}
+      <main className="flex-1 flex flex-col min-w-0 relative">
+        <div className="flex flex-col h-full max-w-[480px] md:max-w-none mx-auto w-full border-x border-bible-border shadow-2xl md:shadow-none bg-bible-bg relative overflow-hidden">
+          <header className="shrink-0 p-4 pb-3 border-b border-bible-border bg-bible-bg z-10 space-y-3" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="md:hidden flex items-center gap-2">
+                  <BookIcon className="w-5 h-5 text-bible-accent" />
+                  <h1 className="font-sans text-lg font-bold tracking-tight text-bible-ink">Lumina</h1>
+                </div>
+                <div className="hidden md:flex items-center gap-3 animate-in fade-in slide-in-from-left-4">
+                   <h2 className="font-sans text-lg font-bold text-bible-ink">{currentBook.nameKr} <span className="text-bible-accent ml-1">{currentChapter}</span></h2>
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                <Badge variant={isOriginalOn ? "default" : "outline"} className={`text-[10px] font-bold uppercase tracking-wider cursor-pointer transition-all duration-300 ${isOriginalOn ? 'bg-bible-accent text-white border-transparent' : 'text-bible-muted border-bible-border'}`} onClick={() => setShowOriginal(!showOriginal)}>{LANGUAGE_LABELS[currentBook.language]}</Badge>
+                <Sheet>
+                  <SheetTrigger asChild><Button variant="ghost" size="icon" className="text-bible-muted h-8 w-8"><Settings className="w-4 h-4" /></Button></SheetTrigger>
+                  <SheetContent side="right" className="w-[320px] bg-bible-bg px-6 border-l border-bible-border">
+                    <SheetHeader className="px-0 text-left pb-4 border-b border-bible-border"><SheetTitle className="font-sans text-xl font-bold">Settings</SheetTitle></SheetHeader>
+                    <div className="py-6 space-y-8 h-[calc(100vh-100px)] overflow-y-auto no-scrollbar">
+                      <div className="space-y-4">
+                        <label className="text-[10px] font-extrabold text-bible-secondary uppercase tracking-[2px]">Parallel Translation</label>
+                        <div className="space-y-2">
+                          <button onClick={() => setShowEnglish(!showEnglish)} className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all ${isEnglishOn ? 'border-bible-accent bg-bible-accent/10 shadow-sm' : 'border-bible-border bg-bible-surface'}`}>
+                            <div className="flex items-center gap-3"><Languages className="w-4 h-4 text-bible-accent" /><span className="text-sm font-bold">English (KJV)</span></div>
+                            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${isEnglishOn ? 'bg-bible-accent text-white' : 'bg-bible-border text-bible-muted'}`}>{isEnglishOn ? 'ON' : 'OFF'}</span>
+                          </button>
+                          <button onClick={() => setShowKorean(!showKorean)} className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all ${isKoreanOn ? 'border-bible-accent bg-bible-accent/10 shadow-sm' : 'border-bible-border bg-bible-surface'}`}>
+                            <div className="flex items-center gap-3"><Languages className="w-4 h-4 text-bible-accent" /><span className="text-sm font-bold">Korean (KRV)</span></div>
+                            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${isKoreanOn ? 'bg-bible-accent text-white' : 'bg-bible-border text-bible-muted'}`}>{isKoreanOn ? 'ON' : 'OFF'}</span>
+                          </button>
+                        </div>
+                      </div>
+                      <Separator className="bg-bible-border/50" />
+                      <div className="space-y-4">
+                        <label className="text-[10px] font-extrabold text-bible-secondary uppercase tracking-[2px]">Reading Mode</label>
+                        <div className="grid grid-cols-3 gap-2">
+                          <button onClick={() => setTheme('light')} className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all ${theme === 'light' ? 'border-bible-accent bg-bible-accent/10 ring-1 ring-bible-accent shadow-sm' : 'border-bible-border bg-white hover:bg-bible-surface'}`}><div className="w-8 h-8 rounded-full bg-slate-50 border border-slate-200 shadow-inner flex items-center justify-center"><Type className="w-4 h-4 text-slate-800" /></div><span className="text-[9px] font-bold uppercase tracking-wider">Light</span></button>
+                          <button onClick={() => setTheme('theme-dark')} className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all ${theme === 'theme-dark' ? 'border-bible-accent bg-bible-accent/10 ring-1 ring-bible-accent shadow-sm' : 'border-bible-border bg-[#1A1A1A] hover:bg-bible-border'}`}><div className="w-8 h-8 rounded-full bg-slate-900 border border-slate-700 shadow-inner flex items-center justify-center"><Moon className="w-4 h-4 text-slate-100" /></div><span className="text-[9px] font-bold uppercase tracking-wider">Dark</span></button>
+                          <button onClick={() => setTheme('theme-sepia')} className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all ${theme === 'theme-sepia' ? 'border-bible-accent bg-bible-accent/10 ring-1 ring-bible-accent shadow-sm' : 'border-bible-border bg-[#F4ECD8] hover:bg-[#E9DFC4]'}`}><div className="w-8 h-8 rounded-full bg-[#E9DFC4] border border-[#D1C4A5] shadow-inner flex items-center justify-center"><Eye className="w-4 h-4 text-sepia-900" /></div><span className="text-[9px] font-bold uppercase tracking-wider">Sepia</span></button>
+                        </div>
+                      </div>
+                    </div>
+                  </SheetContent>
+                </Sheet>
+                <div className="md:hidden"><Button variant="ghost" size="icon" className="text-bible-muted h-8 w-8" onClick={() => setIsSearchOpen(true)}><Search className="w-4 h-4" /></Button></div>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 md:mt-1">
+              <div className="flex items-center gap-2 bg-bible-surface hover:bg-bible-border/70 border border-bible-border/50 rounded-xl px-4 py-2.5 flex items-center justify-between cursor-pointer md:hidden" onClick={() => setIsBookPickerOpen(true)}>
+                <div className="flex flex-col"><span className="text-[9px] font-extrabold text-bible-secondary uppercase tracking-widest leading-none mb-1">Current Book</span><div className="flex items-center gap-2"><span className="font-sans text-sm font-bold text-bible-ink truncate max-w-[120px]">{currentBook.nameKr}</span><ChevronDown className="w-3 h-3 text-bible-muted" /></div></div>
+                <div className="text-right"><span className="text-[9px] font-extrabold text-bible-secondary uppercase tracking-widest leading-none mb-1">Chapter</span><span className="block font-sans text-sm font-bold text-bible-accent">{currentChapter}</span></div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex gap-2 flex-1"><Button variant="outline" size="icon" className="h-10 w-10 md:h-9 md:w-9 rounded-xl border-bible-border bg-bible-bg shadow-sm" onClick={handlePrevChapter} disabled={isFirstChapter}><ChevronLeft className="w-5 h-5 md:w-4 md:h-4 text-bible-ink" /></Button><Button variant="outline" size="icon" className="h-10 w-10 md:h-9 md:w-9 rounded-xl border-bible-border bg-bible-bg shadow-sm" onClick={handleNextChapter} disabled={isLastChapter}><ChevronRight className="w-5 h-5 md:w-4 md:h-4 text-bible-ink" /></Button></div>
+                <div className="text-[10px] font-bold text-bible-muted bg-bible-surface px-3 py-1.5 rounded-lg border border-bible-border/50">{progressPercent}% read</div>
+              </div>
+            </div>
+          </header>
+          <div className="h-1 w-full bg-bible-surface overflow-hidden shrink-0"><motion.div className="h-full bg-bible-accent" initial={{ width: 0 }} animate={{ width: `${progressPercent}%` }} transition={{ duration: 0.5 }} /></div>
+          <div className="flex-1 overflow-y-auto bg-bible-bg relative custom-scrollbar scroll-smooth" ref={scrollRef}>
+            <div className="p-6 pb-20 max-w-2xl mx-auto w-full">
+              {loading ? (<div className="flex flex-col items-center justify-center py-20 animate-in fade-in duration-500"><Loader2 className="w-8 h-8 animate-spin text-bible-accent mb-4" /><p className="text-xs font-bold text-bible-muted uppercase tracking-widest">Loading Scriptures...</p></div>) : error ? (<div className="text-center py-20 bg-red-50/50 rounded-2xl border border-red-100 px-6"><p className="text-red-600 font-bold mb-2">Error Loading Text</p><p className="text-sm text-red-500">{error}</p></div>) : (
+                <div className="space-y-1">
+                  {chapterData?.verses.map((v) => (
+                    <VerseItem key={v.number} verse={v} language={currentBook.language} showOriginal={isOriginalOn} englishText={isEnglishOn ? kjvMap.get(v.number) : undefined} koreanText={isKoreanOn ? krvMap.get(v.number) : undefined} originalFontSize={originalFontSize} translationFontSize={translationFontSize} onOriginalFontCycle={() => setOriginalFontSize(nextFontSize(originalFontSize))} onTranslationFontCycle={() => setTranslationFontSize(nextFontSize(translationFontSize))} isHighlighted={v.number === highlightedVerse} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          <AnimatePresence>
+            {isSearchOpen && (
+              <motion.div initial={{ opacity: 0, scale: 0.98, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98, y: 10 }} className="fixed inset-0 z-[100] bg-bible-bg flex flex-col md:hidden">
+                <div className="p-4 pt-[env(safe-area-inset-top)] border-b border-bible-border bg-bible-bg space-y-4">
+                  <div className="flex items-center gap-2"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bible-muted" /><Input autoFocus placeholder="Search all scriptures..." className="pl-10 h-11 bg-bible-surface border-none shadow-sm rounded-xl" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} /></div><Button variant="ghost" size="icon" className="h-11 w-11 rounded-xl" onClick={() => { setIsSearchOpen(false); setSearchQuery(''); setSearchResults([]); }}><X className="w-6 h-6" /></Button></div>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                   {searchResults.map((res, idx) => <SearchResultCard key={`${res.bookNumber}-${res.chapter}-${res.verseNumber}-${idx}`} result={res} onClick={() => handleSearchResultClick(res)} />)}
+                   {isSearching && <div className="flex flex-col items-center py-10"><Loader2 className="w-6 h-6 animate-spin text-bible-accent mb-2" /><p className="text-[10px] font-bold text-bible-muted uppercase tracking-widest">Searching Deeply...</p></div>}
+                   {!isSearching && searchQuery.length >= 2 && searchResults.length === 0 && <div className="text-center py-20 italic text-bible-muted text-sm px-10">No matches found for "{searchQuery}"</div>}
+                </div>
+              </motion.div>
+            )}
+            {isBookPickerOpen && (
+              <motion.div initial={{ opacity: 0, y: "100%" }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: "100%" }} className="fixed inset-0 z-[100] bg-bible-bg pt-[env(safe-area-inset-top)] flex flex-col md:hidden">
+                <div className="shrink-0 flex items-center justify-between p-5 border-b border-bible-border bg-bible-bg"><h2 className="font-sans text-xl font-bold">Select Book</h2><Button variant="ghost" size="icon" className="h-10 w-10 rounded-full bg-bible-surface" onClick={() => setIsBookPickerOpen(false)}><X className="w-5 h-5" /></Button></div>
+                <div className="flex-1 overflow-y-auto p-5 space-y-8 custom-scrollbar pb-20">
+                  <BookSection title="Torah & Historical" subtitle="עברית — Hebrew" books={BIBLE_BOOKS.filter(b => b.language === 'HE')} currentBookNumber={currentBookNumber} onSelect={selectBook} />
+                  <BookSection title="Poetry & Prophets" subtitle="العربية — Arabic" books={BIBLE_BOOKS.filter(b => b.language === 'AR')} currentBookNumber={currentBookNumber} onSelect={selectBook} />
+                  <BookSection title="New Testament" subtitle="Ελληνικά — Greek" books={BIBLE_BOOKS.filter(b => b.language === 'GR')} currentBookNumber={currentBookNumber} onSelect={selectBook} />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <div className="shrink-0 border-t border-bible-border bg-bible-bg md:hidden z-30" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+            <div className="px-3 py-3 overflow-x-auto no-scrollbar"><div className="flex gap-1.5">{Array.from({ length: currentBook.chapters }, (_, i) => i + 1).map(ch => (<button key={ch} onClick={() => setCurrentChapter(ch)} className={`min-w-[40px] h-10 rounded-xl text-xs font-bold transition-all shrink-0 ${currentChapter === ch ? 'bg-bible-accent text-white shadow-lg' : 'bg-bible-surface text-bible-muted hover:bg-bible-border'}`}>{ch}</button>))}</div></div>
+          </div>
+        </div>
+      </main>
     </div>
   );
 }
 
-// ── Search UI Components ───────────────────────────────────────────────
-
-const SearchResultCard: React.FC<{
-  result: SearchResult;
-  onClick: () => void;
-}> = ({ result, onClick }) => {
+const SearchResultCard: React.FC<{ result: SearchResult; onClick: () => void; }> = ({ result, onClick }) => {
   const resultRtl = isRTL(result.language);
   const fontClass = result.language === 'HE' ? 'font-he' : result.language === 'AR' ? 'font-ar' : '';
-  
   return (
-    <button
-      onClick={onClick}
-      className="w-full text-left p-3 bg-bible-bg rounded-lg shadow-sm border border-bible-card-border hover:border-bible-accent/30 hover:shadow-md transition-all duration-200 active:scale-[0.98] cursor-pointer"
-    >
-      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-        <Badge variant="outline" className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0 shrink-0">
-          {result.language}
-        </Badge>
-        <span className="text-[11px] font-bold text-bible-accent truncate">
-          {result.bookName}
-        </span>
-        <span className="text-[10px] text-bible-muted shrink-0">
-          {result.chapter}:{result.verseNumber}
-        </span>
-        <span className="flex gap-1 ml-auto shrink-0">
-          {result.matchedIn.map(src => (
-            <span
-              key={src}
-              className={`text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-full ${
-                src === 'original' ? 'bg-bible-accent/10 text-bible-accent'
-                : src === 'en' ? 'bg-blue-50 text-blue-600'
-                : 'bg-emerald-50 text-emerald-600'
-              }`}
-            >
-              {src === 'original' ? 'Original' : src === 'en' ? 'EN' : 'KR'}
-            </span>
-          ))}
-        </span>
+    <button onClick={onClick} className="group w-full text-left p-4 bg-bible-surface/50 rounded-2xl border border-bible-border hover:border-bible-accent hover:bg-bible-bg hover:shadow-xl transition-all duration-300 active:scale-[0.99] cursor-pointer">
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <Badge variant="outline" className="text-[9px] font-extrabold uppercase tracking-widest px-2 py-0.5 bg-bible-bg">{result.language}</Badge>
+        <span className="text-xs font-bold text-bible-accent truncate">{result.bookName} {result.chapter}:{result.verseNumber}</span>
+        <div className="flex gap-1 ml-auto">
+          {result.matchedIn.map(src => (<span key={src} className={`text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${src === 'original' ? 'bg-bible-accent text-white' : src === 'en' ? 'bg-blue-500 text-white' : 'bg-emerald-500 text-white'}`}>{src === 'original' ? 'ORIG' : src === 'en' ? 'EN' : 'KR'}</span>))}
+        </div>
       </div>
-      {result.matchedIn.includes('original') && (
-        <p className={`text-sm leading-relaxed text-bible-ink line-clamp-2 ${resultRtl ? 'text-right' : ''} ${fontClass}`}>
-          {result.text}
-        </p>
-      )}
-      {result.matchedIn.includes('en') && result.englishText && (
-        <p className="text-[12px] leading-relaxed text-blue-700/80 line-clamp-2 mt-0.5">
-          <span className="text-[9px] font-bold text-blue-400 uppercase mr-1">EN</span>
-          {result.englishText}
-        </p>
-      )}
-      {result.matchedIn.includes('kr') && result.koreanText && (
-        <p className="text-[12px] leading-relaxed text-emerald-700/80 font-kr line-clamp-2 mt-0.5">
-          <span className="text-[9px] font-bold text-emerald-400 uppercase mr-1">KR</span>
-          {result.koreanText}
-        </p>
-      )}
+      <p className={`text-sm leading-relaxed text-bible-ink line-clamp-2 ${resultRtl ? 'text-right' : ''} ${fontClass}`}>{result.text}</p>
     </button>
   );
 };
 
-// ── Book Section in Picker ──────────────────────────────────────────────
+const CompactBookPicker: React.FC<{ currentBookNumber: number; onSelect: (book: BookMeta) => void; }> = ({ currentBookNumber, onSelect }) => {
+  const [query, setQuery] = useState('');
+  const filteredBooks = useMemo(() => {
+    const q = query.toLowerCase();
+    return BIBLE_BOOKS.filter(b => b.nameEn.toLowerCase().includes(q) || b.nameKr.includes(q) || b.nameOriginal.toLowerCase().includes(q));
+  }, [query]);
+  return (
+    <div className="flex flex-col h-full bg-bible-bg">
+      <div className="p-4 pb-0"><div className="relative group"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bible-muted group-focus-within:text-bible-accent transition-colors" /><Input placeholder="Search book..." className="pl-10 h-10 text-sm bg-bible-surface border-none shadow-none rounded-xl focus-visible:ring-1 focus-visible:ring-bible-accent/30" value={query} onChange={(e) => setQuery(e.target.value)} /></div></div>
+      <div className="flex-1 overflow-y-auto p-4 space-y-1.5 custom-scrollbar">
+        {filteredBooks.map(book => (
+          <button key={book.number} onClick={() => onSelect(book)} className={`w-full text-left px-4 py-3 rounded-xl transition-all duration-300 group ${currentBookNumber === book.number ? 'bg-bible-accent text-white shadow-lg scale-[1.02]' : 'hover:bg-bible-surface text-bible-ink'}`}>
+            <div className="flex items-center justify-between mb-0.5"><span className="text-sm font-bold truncate">{book.nameKr}</span><span className={`text-[10px] font-extrabold tracking-widest ${currentBookNumber === book.number ? 'text-white/60' : 'text-bible-muted'}`}>{book.language}</span></div>
+            <div className={`text-[11px] truncate ${currentBookNumber === book.number ? 'text-white/80' : 'text-bible-secondary'}`}>{book.nameEn} • <span className="italic opacity-80">{book.nameOriginal}</span></div>
+          </button>
+        ))}
+        {filteredBooks.length === 0 && <div className="text-center py-20 px-6"><p className="text-sm text-bible-muted italic">No scriptures found for "{query}"</p></div>}
+      </div>
+    </div>
+  );
+};
 
-const BookSection: React.FC<{
-  title: string;
-  subtitle: string;
-  books: BookMeta[];
-  currentBookNumber: number;
-  onSelect: (book: BookMeta) => void;
-}> = ({ title, subtitle, books, currentBookNumber, onSelect }) => (
-  <div>
-    <h3 className="text-[11px] font-extrabold text-bible-secondary uppercase tracking-[2px] mb-1">
-      {title}
-    </h3>
-    <p className="text-[10px] text-bible-muted mb-3">{subtitle}</p>
-    <div className="grid grid-cols-2 gap-1.5">
+const BookSection: React.FC<{ title: string; subtitle: string; books: BookMeta[]; currentBookNumber: number; onSelect: (book: BookMeta) => void; }> = ({ title, subtitle, books, currentBookNumber, onSelect }) => (
+  <div className="space-y-4">
+    <div className="px-2"><h3 className="text-[11px] font-black text-bible-secondary uppercase tracking-[3px] mb-1">{title}</h3><p className="text-[10px] text-bible-muted font-medium italic">{subtitle}</p></div>
+    <div className="grid grid-cols-2 gap-2.5">
       {books.map(book => (
-        <button
-          key={book.number}
-          onClick={() => onSelect(book)}
-          className={`text-left px-3 py-2.5 rounded-lg text-sm transition-colors ${
-            currentBookNumber === book.number
-              ? 'bg-bible-accent text-white'
-              : 'bg-bible-surface text-bible-ink hover:bg-bible-border'
-          }`}
-        >
-          <span className="font-medium block truncate">{book.nameEn}</span>
-          <span className={`text-[11px] block truncate ${
-            currentBookNumber === book.number ? 'text-white/70' : 'text-bible-muted'
-          }`}>
-            {book.nameOriginal}
-          </span>
+        <button key={book.number} onClick={() => onSelect(book)} className={`text-left px-4 py-4 rounded-2xl transition-all duration-300 ${currentBookNumber === book.number ? 'bg-bible-accent text-white shadow-xl scale-[1.02]' : 'bg-bible-surface text-bible-ink hover:bg-bible-border/50 border border-bible-border/30'}`}>
+          <span className="text-base font-bold block truncate mb-1">{book.nameKr}</span>
+          <span className={`text-[11px] font-medium block truncate opacity-70 ${currentBookNumber === book.number ? 'text-white' : 'text-bible-muted'}`}>{book.nameEn}</span>
         </button>
       ))}
     </div>
   </div>
 );
 
-// ── Verse Display ───────────────────────────────────────────────────────
-
-/** Only fire callback on a clean click (no text selected) */
 function handleClickIfNoSelection(callback: () => void) {
   return () => {
     const selection = window.getSelection();
@@ -1147,73 +603,20 @@ function handleClickIfNoSelection(callback: () => void) {
   };
 }
 
-const VerseItem: React.FC<{
-  verse: Verse;
-  language: Language;
-  showOriginal: boolean;
-  englishText?: string;
-  koreanText?: string;
-  originalFontSize: FontSizePreset;
-  translationFontSize: FontSizePreset;
-  onOriginalFontCycle: () => void;
-  onTranslationFontCycle: () => void;
-  isHighlighted?: boolean;
-}> = ({ verse, language, showOriginal, englishText, koreanText, originalFontSize, translationFontSize, onOriginalFontCycle, onTranslationFontCycle, isHighlighted }) => {
+const VerseItem: React.FC<{ verse: Verse; language: Language; showOriginal: boolean; englishText?: string; koreanText?: string; originalFontSize: FontSizePreset; translationFontSize: FontSizePreset; onOriginalFontCycle: () => void; onTranslationFontCycle: () => void; isHighlighted?: boolean; }> = ({ verse, language, showOriginal, englishText, koreanText, originalFontSize, translationFontSize, onOriginalFontCycle, onTranslationFontCycle, isHighlighted }) => {
   const rtl = isRTL(language);
   const fontClass = language === 'HE' ? 'font-he' : language === 'AR' ? 'font-ar' : '';
   const origSizeClass = rtl ? ORIGINAL_RTL_FONT_SIZES[originalFontSize] : ORIGINAL_FONT_SIZES[originalFontSize];
   const transSizeClass = TRANSLATION_FONT_SIZES[translationFontSize];
-
   return (
-    <div
-      id={`verse-${verse.number}`}
-      className={`py-3 border-b border-bible-border/50 rounded-lg transition-all duration-700 ${rtl ? 'text-right' : ''} ${
-        isHighlighted ? 'bg-amber-50 border-amber-200 ring-2 ring-amber-300/50 shadow-md px-2 -mx-2' : ''
-      }`}
-    >
-      {/* Verse number + original text */}
-      <div className={`flex gap-2 ${rtl ? 'flex-row-reverse' : ''}`}>
-        <span className="shrink-0 w-6 h-6 rounded-full bg-bible-accent flex items-center justify-center mt-1">
-          <span className="text-[9px] font-bold text-white">{verse.number}</span>
-        </span>
-        {showOriginal && (
-          <p
-            className={`font-serif text-bible-ink flex-1 cursor-pointer hover:bg-bible-surface/50 rounded-md transition-colors px-1 -mx-1 ${fontClass} ${origSizeClass}`}
-            onClick={handleClickIfNoSelection(onOriginalFontCycle)}
-            title={`Font size: ${FONT_SIZE_LABELS[originalFontSize]} — tap to change`}
-          >
-            {verse.text}
-          </p>
-        )}
+    <div id={`verse-${verse.number}`} className={`py-4 border-b border-bible-border/40 transition-all duration-1000 ${rtl ? 'text-right' : ''} ${isHighlighted ? 'bg-bible-accent/10 border-bible-accent ring-1 ring-bible-accent/30 shadow-inner px-4 -mx-4 rounded-xl' : ''}`}>
+      <div className={`flex gap-3 ${rtl ? 'flex-row-reverse' : ''}`}><span className="shrink-0 w-7 h-7 rounded-full bg-bible-surface border border-bible-border flex items-center justify-center mt-1 shadow-sm"><span className="text-[10px] font-black text-bible-accent">{verse.number}</span></span>
+        {showOriginal && (<p className={`font-serif text-bible-ink flex-1 cursor-pointer hover:bg-bible-surface/30 rounded-lg transition-colors px-2 -mx-2 py-0.5 ${fontClass} ${origSizeClass}`} onClick={handleClickIfNoSelection(onOriginalFontCycle)}>{verse.text}</p>)}
       </div>
-
-      {/* Translations */}
       {(englishText || koreanText) && (
-        <div className={`mt-2 space-y-1.5 ${rtl ? 'pr-8' : 'pl-8'}`}>
-          {englishText && (
-            <div
-              className="cursor-pointer hover:bg-bible-surface/50 rounded-md transition-colors px-1 -mx-1"
-              onClick={handleClickIfNoSelection(onTranslationFontCycle)}
-              title={`Font size: ${FONT_SIZE_LABELS[translationFontSize]} — tap to change`}
-            >
-              <span className="text-[9px] font-bold text-bible-secondary uppercase tracking-wider">EN</span>
-              <p className={`text-bible-muted ${transSizeClass}`}>
-                {englishText}
-              </p>
-            </div>
-          )}
-          {koreanText && (
-            <div
-              className="cursor-pointer hover:bg-bible-surface/50 rounded-md transition-colors px-1 -mx-1"
-              onClick={handleClickIfNoSelection(onTranslationFontCycle)}
-              title={`Font size: ${FONT_SIZE_LABELS[translationFontSize]} — tap to change`}
-            >
-              <span className="text-[9px] font-bold text-bible-secondary uppercase tracking-wider">KR</span>
-              <p className={`text-bible-muted font-kr ${transSizeClass}`}>
-                {koreanText}
-              </p>
-            </div>
-          )}
+        <div className={`mt-3 space-y-2.5 ${rtl ? 'pr-10' : 'pl-10'}`}>
+          {englishText && (<div className="group cursor-pointer hover:bg-bible-surface/30 rounded-lg transition-colors px-2 -mx-2 py-1" onClick={handleClickIfNoSelection(onTranslationFontCycle)}><span className="text-[9px] font-black text-bible-secondary uppercase tracking-widest opacity-50 group-hover:opacity-100 transition-opacity">English</span><p className={`text-bible-muted font-medium leading-relaxed ${transSizeClass}`}>{englishText}</p></div>)}
+          {koreanText && (<div className="group cursor-pointer hover:bg-bible-surface/30 rounded-lg transition-colors px-2 -mx-2 py-1" onClick={handleClickIfNoSelection(onTranslationFontCycle)}><span className="text-[9px] font-black text-bible-secondary uppercase tracking-widest opacity-50 group-hover:opacity-100 transition-opacity">Korean</span><p className={`text-bible-muted font-kr leading-relaxed ${transSizeClass}`}>{koreanText}</p></div>)}
         </div>
       )}
     </div>
