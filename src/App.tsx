@@ -611,8 +611,8 @@ export default function App() {
                   <Settings className="w-4 h-4" />
                 </Button>
               </SheetTrigger>
-              <SheetContent side="right" className="w-[300px] bg-bible-bg">
-                <SheetHeader>
+              <SheetContent side="right" className="w-[300px] bg-bible-bg px-6">
+                <SheetHeader className="px-0">
                   <SheetTitle className="font-sans text-xl font-bold">Settings</SheetTitle>
                 </SheetHeader>
                 <div className="py-6 space-y-6">
@@ -978,7 +978,7 @@ export default function App() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
-            className="absolute inset-0 z-50 bg-bible-bg flex flex-col"
+            className="absolute inset-0 z-50 bg-bible-bg pt-[env(safe-area-inset-top)] flex flex-col"
           >
             <div className="shrink-0 flex items-center justify-between p-5 border-b border-bible-border">
               <h2 className="font-sans text-lg font-bold">Select Book</h2>
