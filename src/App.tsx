@@ -574,7 +574,11 @@ export default function App() {
   return (
     <div
       className="flex flex-col h-screen max-w-[420px] mx-auto border-x shadow-2xl relative overflow-hidden"
-      style={themeStyle}
+      style={{
+        ...themeStyle,
+        paddingTop: 'env(safe-area-inset-top)',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}
       data-theme={theme}
     >
       <style>{`
