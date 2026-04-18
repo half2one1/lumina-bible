@@ -877,7 +877,7 @@ export default function App() {
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="absolute inset-0 z-50 bg-bible-bg p-4 flex flex-col"
+            className="absolute inset-0 z-50 bg-bible-bg p-4 pt-[env(safe-area-inset-top)] flex flex-col"
           >
             <div className="flex items-center gap-2 mb-3">
               <div className="relative flex-1">
