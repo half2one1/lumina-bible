@@ -87,12 +87,16 @@
 @layer base {
   body {
     @apply font-sans antialiased;
+    overscroll-behavior: none; /* Prevent Android pull-to-refresh / overscroll glow */
   }
   * {
     @apply border-border outline-ring/50;
   }
   html {
     @apply font-sans;
+    /* Prevent text size adjustment on orientation change (Android & iOS) */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
 }
 

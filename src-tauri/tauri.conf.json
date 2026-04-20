@@ -2,10 +2,10 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Lumina Bible",
   "version": "0.1.0",
-  "identifier": "com.lumina.bible",
+  "identifier": "com.hysjh07.lumina",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:3000",
+    "devUrl": "http://192.168.219.118:3000",
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build"
   },
@@ -35,6 +35,9 @@
     ],
     "iOS": {
       "minimumSystemVersion": "15.0"
+    },
+    "android": {
+      "minSdkVersion": 24
     }
   }
 }

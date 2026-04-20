@@ -509,6 +509,26 @@ export default function App() {
     setSearchDone(false);
   }, []);
 
+  // Android hardware back button: close overlays before navigating back
+  useEffect(() => {
+    const handleBackButton = (e: PopStateEvent) => {
+      if (isSearchOpen) {
+        e.preventDefault();
+        setIsSearchOpen(false);
+        window.history.pushState(null, '', window.location.href);
+      } else if (isBookPickerOpen) {
+        e.preventDefault();
+        setIsBookPickerOpen(false);
+        window.history.pushState(null, '', window.location.href);
+      }
+    };
+
+    // Push an initial state so popstate fires instead of closing the app
+    window.history.pushState(null, '', window.location.href);
+    window.addEventListener('popstate', handleBackButton);
+    return () => window.removeEventListener('popstate', handleBackButton);
+  }, [isSearchOpen, isBookPickerOpen]);
+
   // Scroll to highlighted verse after chapter loads
   useEffect(() => {
     if (highlightedVerse !== null && !loading && chapterData) {
