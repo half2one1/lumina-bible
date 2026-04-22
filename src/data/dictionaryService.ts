@@ -53,16 +53,32 @@ class DictionaryService {
   }
 
   async getDefinition(strongs: string): Promise<DictionaryEntry | null> {
-    // Strong's numbers start with 'H' for Hebrew or 'G' for Greek
-    const type = strongs.startsWith('H') ? 'hebrew' : 'greek';
+    const prefix = strongs.charAt(0).toUpperCase();
+    const type = prefix === 'H' ? 'hebrew' : 'greek';
     await this.loadDictionary(type);
     
+    // Pad the numeric part to 4 digits (e.g. "H430" -> "H0430")
+    const numStr = strongs.substring(1).replace(/[^0-9]/g, '');
+    const num = parseInt(numStr, 10);
+    const paddedStrongs = isNaN(num) ? strongs : `${prefix}${num.toString().padStart(4, '0')}`;
+    
+    let entry: DictionaryEntry | null = null;
     if (type === 'hebrew' && this.hebrewDict) {
-      return this.hebrewDict[strongs] || null;
+      entry = this.hebrewDict[paddedStrongs] || this.hebrewDict[strongs] || null;
     } else if (type === 'greek' && this.greekDict) {
-      return this.greekDict[strongs] || null;
+      entry = this.greekDict[paddedStrongs] || this.greekDict[strongs] || null;
     }
-    return null;
+
+    // Return a fallback entry if not found so the UI stops spinning
+    if (!entry) {
+      return {
+        lemma: 'Unknown',
+        transliteration: '-',
+        gloss: 'Definition not available',
+        definition: 'Could not find a dictionary entry for this Strongs number.'
+      };
+    }
+    return entry;
   }
 }
 
