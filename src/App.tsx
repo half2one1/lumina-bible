@@ -719,17 +719,24 @@ const VerseItem: React.FC<{ verse: Verse; language: Language; showOriginal: bool
         
         <div className="flex-1 flex flex-col justify-center">
           {showOriginal && (
-            <div className={`font-serif text-bible-ink hover:bg-bible-surface/30 rounded-lg transition-colors px-2 -mx-2 py-0.5 mb-1.5 ${fontClass} ${origSizeClass} ${rtl ? 'text-right' : 'text-left'}`} dir={rtl ? 'rtl' : 'ltr'}>
+            <div className={`font-serif text-bible-ink hover:bg-bible-surface/30 rounded-lg transition-colors px-2 -mx-2 py-0.5 mb-1.5 cursor-pointer ${fontClass} ${origSizeClass} ${rtl ? 'text-right' : 'text-left'}`} dir={rtl ? 'rtl' : 'ltr'} onClick={handleClickIfNoSelection(onOriginalFontCycle)}>
               {verse.words && verse.words.length > 0 ? (
                 <div className="flex flex-wrap gap-x-1.5 gap-y-1">
                   {verse.words.map((w, i) => (
-                    <span key={i} className={w.strongs ? "cursor-pointer hover:text-bible-accent transition-colors" : ""} onClick={() => w.strongs && onWordClick?.(w.strongs, w.text)}>
+                    <span key={i} className={w.strongs ? "hover:text-bible-accent transition-colors" : ""} onClick={(e) => {
+                      if (w.strongs) {
+                        e.stopPropagation();
+                        const selection = window.getSelection();
+                        if (selection && selection.toString().length > 0) return;
+                        onWordClick?.(w.strongs, w.text);
+                      }
+                    }}>
                       {w.text}
                     </span>
                   ))}
                 </div>
               ) : (
-                <p onClick={handleClickIfNoSelection(onOriginalFontCycle)} className="cursor-pointer">{verse.text}</p>
+                <p>{verse.text}</p>
               )}
             </div>
           )}
