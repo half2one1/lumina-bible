@@ -163,8 +163,8 @@ async function downloadBook(book: BookDef): Promise<void> {
         
         const verses = metaxiaVerses.map(mv => {
           return {
-            number: mv.verse,
-            text: mv.text.trim(),
+            number: mv.number,
+            text: mv.text ? mv.text.trim() : mv.words?.map(w => w.text).join(' ') || '',
             words: mv.words?.map(w => ({
               text: w.text,
               strongs: w.strongs && w.strongs.length > 0 ? w.strongs[0] : undefined,
