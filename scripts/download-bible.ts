@@ -14,6 +14,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import * as metaxia from '@metaxia/scriptures';
 
 // ── Book definitions (mirrors bibleStructure.ts) ──────────────────────────
 
@@ -149,49 +150,83 @@ interface GetBibleBook {
 // ── Main download logic ───────────────────────────────────────────────────
 
 async function downloadBook(book: BookDef): Promise<void> {
-  const translation = TRANSLATION_MAP[book.language];
-  const url = `${BASE_URL}/${translation}/${book.number}.json`;
   const lang = book.language.toLowerCase();
-
-  console.log(`📖 Downloading ${book.nameEn} (${translation})...`);
-
-  let data: GetBibleBook;
-  try {
-    data = await fetchWithRetry(url);
-  } catch (err: any) {
-    console.error(`  ❌ Failed to download ${book.nameEn}: ${err.message}`);
-    return;
-  }
-
-  const chaptersData = data.chapters;
   let chaptersWritten = 0;
 
-  for (const chapter of chaptersData) {
-    const chapterNum = chapter.chapter;
+  if (book.language === 'HE' || book.language === 'GR') {
+    const edition = book.language === 'HE' ? 'openscriptures-OHB' : 'stepbible-tagnt-tr';
+    console.log(`📖 Extracting ${book.nameEn} (${edition})...`);
+    
+    for (let chapterNum = 1; chapterNum <= book.chapters; chapterNum++) {
+      try {
+        const metaxiaVerses = await metaxia.getChapter(book.nameEn, chapterNum, { edition });
+        
+        const verses = metaxiaVerses.map(mv => {
+          return {
+            number: mv.verse,
+            text: mv.text.trim(),
+            words: mv.words?.map(w => ({
+              text: w.text,
+              strongs: w.strongs && w.strongs.length > 0 ? w.strongs[0] : undefined,
+              transliteration: w.lexiconEntry?.transliteration || undefined
+            }))
+          };
+        });
 
-    // Convert verses array to our format
-    const verses = chapter.verses
-      .sort((a: GetBibleVerse, b: GetBibleVerse) => a.verse - b.verse)
-      .map((v: GetBibleVerse) => ({
-        number: v.verse,
-        text: v.text.trim(),
-      }));
+        const chapterData = {
+          bookNumber: book.number,
+          bookName: book.nameEn,
+          chapter: chapterNum,
+          language: book.language,
+          verses,
+        };
 
-    const chapterData = {
-      bookNumber: book.number,
-      bookName: book.nameEn,
-      chapter: chapterNum,
-      language: book.language,
-      verses,
-    };
+        const dir = path.join(OUTPUT_DIR, lang, String(book.number));
+        fs.mkdirSync(dir, { recursive: true });
+        const filePath = path.join(dir, `${chapterNum}.json`);
+        fs.writeFileSync(filePath, JSON.stringify(chapterData, null, 2), 'utf-8');
+        chaptersWritten++;
+      } catch (err: any) {
+        console.error(`  ❌ Failed to extract ${book.nameEn} Chapter ${chapterNum}: ${err.message}`);
+      }
+    }
+  } else {
+    // Fallback to getbible.net for Arabic
+    const translation = TRANSLATION_MAP[book.language];
+    const url = `${BASE_URL}/${translation}/${book.number}.json`;
+    console.log(`📖 Downloading ${book.nameEn} (${translation})...`);
 
-    // Write chapter file
-    const dir = path.join(OUTPUT_DIR, lang, String(book.number));
-    fs.mkdirSync(dir, { recursive: true });
+    let data: GetBibleBook;
+    try {
+      data = await fetchWithRetry(url);
+    } catch (err: any) {
+      console.error(`  ❌ Failed to download ${book.nameEn}: ${err.message}`);
+      return;
+    }
 
-    const filePath = path.join(dir, `${chapterNum}.json`);
-    fs.writeFileSync(filePath, JSON.stringify(chapterData, null, 2), 'utf-8');
-    chaptersWritten++;
+    for (const chapter of data.chapters) {
+      const chapterNum = chapter.chapter;
+      const verses = chapter.verses
+        .sort((a: GetBibleVerse, b: GetBibleVerse) => a.verse - b.verse)
+        .map((v: GetBibleVerse) => ({
+          number: v.verse,
+          text: v.text.trim(),
+        }));
+
+      const chapterData = {
+        bookNumber: book.number,
+        bookName: book.nameEn,
+        chapter: chapterNum,
+        language: book.language,
+        verses,
+      };
+
+      const dir = path.join(OUTPUT_DIR, lang, String(book.number));
+      fs.mkdirSync(dir, { recursive: true });
+      const filePath = path.join(dir, `${chapterNum}.json`);
+      fs.writeFileSync(filePath, JSON.stringify(chapterData, null, 2), 'utf-8');
+      chaptersWritten++;
+    }
   }
 
   console.log(`  ✅ ${book.nameEn}: ${chaptersWritten} chapters saved`);

@@ -42,7 +42,26 @@
   --color-bible-border: #F0F0F0;
   --color-bible-card-border: #E0E0E0;
   --color-bible-surface: #F2F2F2;
+
+  /* Responsive Font Scaling */
+  --text-bible-orig: 1rem;
+  --text-bible-trans: 0.8125rem;
 }
+
+@media (min-width: 1024px) {
+  @theme {
+    --text-bible-orig: 1.125rem;
+    --text-bible-trans: 0.9375rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  @theme {
+    --text-bible-orig: 1.25rem;
+    --text-bible-trans: 1.0625rem;
+  }
+}
+
 
 /* ── Runtime theme overrides via data-theme attribute ─────────── */
 [data-theme="dark"] {
