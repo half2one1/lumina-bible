@@ -709,30 +709,35 @@ const VerseItem: React.FC<{ verse: Verse; language: Language; showOriginal: bool
   const origSizeClass = rtl ? ORIGINAL_RTL_FONT_SIZES[originalFontSize] : ORIGINAL_FONT_SIZES[originalFontSize];
   const transSizeClass = TRANSLATION_FONT_SIZES[translationFontSize];
   return (
-    <div id={`verse-${verse.number}`} className={`py-4 border-b border-bible-border/40 transition-all duration-1000 ${rtl ? 'text-right' : ''} ${isHighlighted ? 'bg-bible-accent/10 border-bible-accent ring-1 ring-bible-accent/30 shadow-inner px-4 -mx-4 rounded-xl' : ''}`}>
-      <div className={`flex gap-3 ${rtl ? 'flex-row-reverse' : ''}`}><span className="shrink-0 w-7 h-7 rounded-full bg-bible-surface border border-bible-border flex items-center justify-center mt-1 shadow-sm"><span className="text-[10px] font-black text-bible-accent">{verse.number}</span></span>
-        {showOriginal && (
-          <div className={`font-serif text-bible-ink flex-1 hover:bg-bible-surface/30 rounded-lg transition-colors px-2 -mx-2 py-0.5 ${fontClass} ${origSizeClass}`} dir={rtl ? 'rtl' : 'ltr'}>
-            {verse.words && verse.words.length > 0 ? (
-              <div className="flex flex-wrap gap-x-1.5 gap-y-1">
-                {verse.words.map((w, i) => (
-                  <span key={i} className={w.strongs ? "cursor-pointer hover:text-bible-accent transition-colors" : ""} onClick={() => w.strongs && onWordClick?.(w.strongs, w.text)}>
-                    {w.text}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p onClick={handleClickIfNoSelection(onOriginalFontCycle)} className="cursor-pointer">{verse.text}</p>
-            )}
-          </div>
-        )}
-      </div>
-      {(englishText || koreanText) && (
-        <div className={`mt-3 space-y-2.5 ${rtl ? 'pr-10' : 'pl-10'}`}>
-          {englishText && (<div className="group cursor-pointer hover:bg-bible-surface/30 rounded-lg transition-colors px-2 -mx-2 py-1" onClick={handleClickIfNoSelection(onTranslationFontCycle)}><span className="text-[9px] font-black text-bible-secondary uppercase tracking-widest opacity-50 group-hover:opacity-100 transition-opacity">English</span><p className={`text-bible-muted font-medium leading-relaxed ${transSizeClass}`}>{englishText}</p></div>)}
-          {koreanText && (<div className="group cursor-pointer hover:bg-bible-surface/30 rounded-lg transition-colors px-2 -mx-2 py-1" onClick={handleClickIfNoSelection(onTranslationFontCycle)}><span className="text-[9px] font-black text-bible-secondary uppercase tracking-widest opacity-50 group-hover:opacity-100 transition-opacity">Korean</span><p className={`text-bible-muted font-kr leading-relaxed ${transSizeClass}`}>{koreanText}</p></div>)}
+    <div id={`verse-${verse.number}`} className={`py-1.5 border-b border-bible-border/40 transition-all duration-1000 ${isHighlighted ? 'bg-bible-accent/10 border-bible-accent ring-1 ring-bible-accent/30 shadow-inner px-4 -mx-4 rounded-xl' : ''}`}>
+      <div className={`flex gap-3 ${rtl ? 'flex-row-reverse' : ''}`}>
+        <span className="shrink-0 w-7 h-7 rounded-full bg-bible-surface border border-bible-border flex items-center justify-center mt-1 shadow-sm"><span className="text-[10px] font-black text-bible-accent">{verse.number}</span></span>
+        
+        <div className="flex-1 flex flex-col justify-center">
+          {showOriginal && (
+            <div className={`font-serif text-bible-ink hover:bg-bible-surface/30 rounded-lg transition-colors px-2 -mx-2 py-0.5 mb-1.5 ${fontClass} ${origSizeClass} ${rtl ? 'text-right' : 'text-left'}`} dir={rtl ? 'rtl' : 'ltr'}>
+              {verse.words && verse.words.length > 0 ? (
+                <div className="flex flex-wrap gap-x-1.5 gap-y-1">
+                  {verse.words.map((w, i) => (
+                    <span key={i} className={w.strongs ? "cursor-pointer hover:text-bible-accent transition-colors" : ""} onClick={() => w.strongs && onWordClick?.(w.strongs, w.text)}>
+                      {w.text}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p onClick={handleClickIfNoSelection(onOriginalFontCycle)} className="cursor-pointer">{verse.text}</p>
+              )}
+            </div>
+          )}
+
+          {(englishText || koreanText) && (
+            <div className={`space-y-1.5 ${rtl ? 'text-right' : 'text-left'} ${!showOriginal ? 'mt-1' : ''}`}>
+              {englishText && (<div className="group cursor-pointer hover:bg-bible-surface/30 rounded-lg transition-colors px-2 -mx-2 py-1" onClick={handleClickIfNoSelection(onTranslationFontCycle)}><span className="text-[9px] font-black text-bible-secondary uppercase tracking-widest opacity-50 group-hover:opacity-100 transition-opacity">English</span><p className={`text-bible-muted font-medium leading-relaxed ${transSizeClass}`}>{englishText}</p></div>)}
+              {koreanText && (<div className="group cursor-pointer hover:bg-bible-surface/30 rounded-lg transition-colors px-2 -mx-2 py-1" onClick={handleClickIfNoSelection(onTranslationFontCycle)}><span className="text-[9px] font-black text-bible-secondary uppercase tracking-widest opacity-50 group-hover:opacity-100 transition-opacity">Korean</span><p className={`text-bible-muted font-kr leading-relaxed ${transSizeClass}`}>{koreanText}</p></div>)}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 };
