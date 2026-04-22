@@ -43,8 +43,13 @@ class DictionaryService {
   }
 
   prefetch(type: 'hebrew' | 'greek') {
-    // Fire and forget
-    this.loadDictionary(type);
+    if (type === 'hebrew' && (this.hebrewDict || this.hebrewPromise)) return;
+    if (type === 'greek' && (this.greekDict || this.greekPromise)) return;
+
+    // Fire and forget, but delay it so it doesn't block chapter UI rendering
+    setTimeout(() => {
+      this.loadDictionary(type);
+    }, 1500);
   }
 
   async getDefinition(strongs: string): Promise<DictionaryEntry | null> {
