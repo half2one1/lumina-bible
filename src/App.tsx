@@ -261,6 +261,10 @@ export default function App() {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    
+    if (currentBook.language === 'HE') dictionaryService.prefetch('hebrew');
+    else if (currentBook.language === 'GR') dictionaryService.prefetch('greek');
+    
     const isKoreanOn = showKorean || (!showOriginal && !showEnglish && !showKorean);
     const promises: [Promise<ChapterData>, Promise<ChapterData | null>, Promise<ChapterData | null>] = [
       bibleService.getChapter(currentBook, currentChapter),
