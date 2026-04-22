@@ -23,7 +23,8 @@ import {
   isRTL,
   BASE_LANGUAGE_NAMES,
 } from './data/bibleStructure';
-import { bibleService, ChapterData, Verse } from './data/bibleService';
+import { bibleService, ChapterData, Verse, WordSpan } from './data/bibleService';
+import { dictionaryService, DictionaryEntry } from './data/dictionaryService';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
@@ -137,6 +138,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isBookPickerOpen, setIsBookPickerOpen] = useState(false);
+  const [selectedWord, setSelectedWord] = useState<{ strongs: string; text: string; entry: DictionaryEntry | null } | null>(null);
   const [searchResults, setSearchResults] = useState<SearchResult[]>(() => {
     try {
       const cached = localStorage.getItem('lumina-last-search-results');
@@ -483,7 +485,7 @@ export default function App() {
                     </div>
                   </SheetContent>
                 </Sheet>
-                <div className="md:hidden"><Button variant="ghost" size="icon" className="text-bible-muted h-8 w-8" onClick={() => setIsSearchOpen(true)}><Search className="w-4 h-4" /></Button></div>
+                <div><Button variant="ghost" size="icon" className="text-bible-muted h-8 w-8" onClick={() => setIsSearchOpen(true)}><Search className="w-4 h-4" /></Button></div>
               </div>
             </div>
             <div className="flex flex-col gap-2 md:mt-1">
@@ -503,7 +505,24 @@ export default function App() {
               {loading ? (<div className="flex flex-col items-center justify-center py-20 animate-in fade-in duration-500"><Loader2 className="w-8 h-8 animate-spin text-bible-accent mb-4" /><p className="text-xs font-bold text-bible-muted uppercase tracking-widest">Loading Scriptures...</p></div>) : error ? (<div className="text-center py-20 bg-red-50/50 rounded-2xl border border-red-100 px-6"><p className="text-red-600 font-bold mb-2">Error Loading Text</p><p className="text-sm text-red-500">{error}</p></div>) : (
                 <div className="space-y-1">
                   {chapterData?.verses.map((v) => (
-                    <VerseItem key={v.number} verse={v} language={currentBook.language} showOriginal={isOriginalOn} englishText={isEnglishOn ? kjvMap.get(v.number) : undefined} koreanText={isKoreanOn ? krvMap.get(v.number) : undefined} originalFontSize={originalFontSize} translationFontSize={translationFontSize} onOriginalFontCycle={() => setOriginalFontSize(nextFontSize(originalFontSize))} onTranslationFontCycle={() => setTranslationFontSize(nextFontSize(translationFontSize))} isHighlighted={v.number === highlightedVerse} />
+                    <VerseItem 
+                      key={v.number} 
+                      verse={v} 
+                      language={currentBook.language} 
+                      showOriginal={isOriginalOn} 
+                      englishText={isEnglishOn ? kjvMap.get(v.number) : undefined} 
+                      koreanText={isKoreanOn ? krvMap.get(v.number) : undefined} 
+                      originalFontSize={originalFontSize} 
+                      translationFontSize={translationFontSize} 
+                      onOriginalFontCycle={() => setOriginalFontSize(nextFontSize(originalFontSize))} 
+                      onTranslationFontCycle={() => setTranslationFontSize(nextFontSize(translationFontSize))} 
+                      isHighlighted={v.number === highlightedVerse}
+                      onWordClick={async (strongs, text) => {
+                        setSelectedWord({ strongs, text, entry: null });
+                        const entry = await dictionaryService.getDefinition(strongs);
+                        setSelectedWord(prev => prev && prev.strongs === strongs ? { ...prev, entry } : prev);
+                      }}
+                    />
                   ))}
                 </div>
               )}
@@ -511,14 +530,16 @@ export default function App() {
           </div>
           <AnimatePresence>
             {isSearchOpen && (
-              <motion.div initial={{ opacity: 0, scale: 0.98, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98, y: 10 }} className="fixed inset-0 z-[100] bg-bible-bg flex flex-col md:hidden">
-                <div className="p-4 pt-[env(safe-area-inset-top)] border-b border-bible-border bg-bible-bg space-y-4">
-                  <div className="flex items-center gap-2"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bible-muted" /><Input autoFocus placeholder="Search all scriptures..." className="pl-10 h-11 bg-bible-surface border-none shadow-sm rounded-xl" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} /></div><Button variant="ghost" size="icon" className="h-11 w-11 rounded-xl" onClick={() => { setIsSearchOpen(false); setSearchQuery(''); setSearchResults([]); }}><X className="w-6 h-6" /></Button></div>
-                </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                   {searchResults.map((res, idx) => <SearchResultCard key={`${res.bookNumber}-${res.chapter}-${res.verseNumber}-${idx}`} result={res} onClick={() => handleSearchResultClick(res)} />)}
-                   {isSearching && <div className="flex flex-col items-center py-10"><Loader2 className="w-6 h-6 animate-spin text-bible-accent mb-2" /><p className="text-[10px] font-bold text-bible-muted uppercase tracking-widest">Searching Deeply...</p></div>}
-                   {!isSearching && searchQuery.length >= 2 && searchResults.length === 0 && <div className="text-center py-20 italic text-bible-muted text-sm px-10">No matches found for "{searchQuery}"</div>}
+              <motion.div initial={{ opacity: 0, scale: 0.98, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98, y: 10 }} className="fixed inset-0 z-[100] bg-bible-bg flex flex-col items-center">
+                <div className="w-full max-w-3xl flex flex-col h-full">
+                  <div className="p-4 pt-[env(safe-area-inset-top)] md:pt-8 border-b border-bible-border bg-bible-bg space-y-4 shrink-0">
+                    <div className="flex items-center gap-2"><div className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-bible-muted" /><Input autoFocus placeholder="Search all scriptures..." className="pl-10 h-11 bg-bible-surface border-none shadow-sm rounded-xl" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} /></div><Button variant="ghost" size="icon" className="h-11 w-11 rounded-xl" onClick={() => { setIsSearchOpen(false); setSearchQuery(''); setSearchResults([]); }}><X className="w-6 h-6" /></Button></div>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-3 custom-scrollbar w-full">
+                     {searchResults.map((res, idx) => <SearchResultCard key={`${res.bookNumber}-${res.chapter}-${res.verseNumber}-${idx}`} result={res} onClick={() => handleSearchResultClick(res)} />)}
+                     {isSearching && <div className="flex flex-col items-center py-10"><Loader2 className="w-6 h-6 animate-spin text-bible-accent mb-2" /><p className="text-[10px] font-bold text-bible-muted uppercase tracking-widest">Searching Deeply...</p></div>}
+                     {!isSearching && searchQuery.length >= 2 && searchResults.length === 0 && <div className="text-center py-20 italic text-bible-muted text-sm px-10">No matches found for "{searchQuery}"</div>}
+                  </div>
                 </div>
               </motion.div>
             )}
@@ -536,6 +557,51 @@ export default function App() {
           <div className="shrink-0 border-t border-bible-border bg-bible-bg md:hidden z-30" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
             <div className="px-3 py-3 overflow-x-auto no-scrollbar"><div className="flex gap-1.5">{Array.from({ length: currentBook.chapters }, (_, i) => i + 1).map(ch => (<button key={ch} onClick={() => setCurrentChapter(ch)} className={`min-w-[40px] h-10 rounded-xl text-xs font-bold transition-all shrink-0 ${currentChapter === ch ? 'bg-bible-accent text-white shadow-lg' : 'bg-bible-surface text-bible-muted hover:bg-bible-border'}`}>{ch}</button>))}</div></div>
           </div>
+          <AnimatePresence>
+            {selectedWord && (
+              <motion.div initial={{ opacity: 0, y: "100%" }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: "100%" }} transition={{ type: "spring", bounce: 0, duration: 0.4 }} className="absolute inset-x-0 bottom-0 z-[60] bg-bible-bg border-t border-bible-border shadow-[0_-20px_40px_-15px_rgba(0,0,0,0.1)] rounded-t-3xl md:max-w-[480px] md:mx-auto pb-[env(safe-area-inset-bottom)]">
+                <div className="p-6">
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <h3 className="font-serif text-3xl font-bold text-bible-ink mb-1" dir={isRTL(currentBook.language) ? 'rtl' : 'ltr'}>{selectedWord.text}</h3>
+                      {selectedWord.entry ? (
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-[10px] font-black uppercase tracking-widest text-bible-accent border-bible-accent/30">{selectedWord.strongs}</Badge>
+                          <span className="text-sm font-medium text-bible-secondary italic">{selectedWord.entry.transliteration}</span>
+                        </div>
+                      ) : (
+                        <Badge variant="outline" className="text-[10px] font-black uppercase tracking-widest text-bible-muted">{selectedWord.strongs}</Badge>
+                      )}
+                    </div>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full bg-bible-surface" onClick={() => setSelectedWord(null)}>
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  {selectedWord.entry ? (
+                    <div className="space-y-4 max-h-[40vh] overflow-y-auto custom-scrollbar pr-2">
+                      <div>
+                        <h4 className="text-[10px] font-extrabold text-bible-secondary uppercase tracking-widest mb-1">Root / Lemma</h4>
+                        <p className="font-serif text-lg text-bible-ink" dir={isRTL(currentBook.language) ? 'rtl' : 'ltr'}>{selectedWord.entry.lemma}</p>
+                      </div>
+                      <div>
+                        <h4 className="text-[10px] font-extrabold text-bible-secondary uppercase tracking-widest mb-1">Gloss</h4>
+                        <p className="text-sm font-bold text-bible-ink">{selectedWord.entry.gloss}</p>
+                      </div>
+                      <div>
+                        <h4 className="text-[10px] font-extrabold text-bible-secondary uppercase tracking-widest mb-1">Definition</h4>
+                        <div className="text-sm text-bible-muted leading-relaxed space-y-2" dangerouslySetInnerHTML={{ __html: selectedWord.entry.definition }} />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center py-8">
+                      <Loader2 className="w-6 h-6 animate-spin text-bible-accent mb-2" />
+                      <p className="text-xs text-bible-muted">Loading dictionary...</p>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </main>
     </div>
@@ -554,7 +620,21 @@ const SearchResultCard: React.FC<{ result: SearchResult; onClick: () => void; }>
           {result.matchedIn.map(src => (<span key={src} className={`text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded-md ${src === 'original' ? 'bg-bible-accent text-white' : src === 'en' ? 'bg-blue-500 text-white' : 'bg-emerald-500 text-white'}`}>{src === 'original' ? 'ORIG' : src === 'en' ? 'EN' : 'KR'}</span>))}
         </div>
       </div>
-      <p className={`text-sm leading-relaxed text-bible-ink line-clamp-2 ${resultRtl ? 'text-right' : ''} ${fontClass}`}>{result.text}</p>
+      {result.matchedIn.includes('original') && (
+        <p className={`text-sm leading-relaxed text-bible-ink line-clamp-2 ${resultRtl ? 'text-right' : ''} ${fontClass}`}>{result.text}</p>
+      )}
+      {result.matchedIn.includes('en') && result.englishText && (
+        <p className="text-[12px] leading-relaxed text-blue-700/80 line-clamp-2 mt-1">
+          <span className="text-[9px] font-bold text-blue-400 uppercase mr-1">EN</span>
+          {result.englishText}
+        </p>
+      )}
+      {result.matchedIn.includes('kr') && result.koreanText && (
+        <p className="text-[12px] leading-relaxed text-emerald-700/80 font-kr line-clamp-2 mt-1">
+          <span className="text-[9px] font-bold text-emerald-400 uppercase mr-1">KR</span>
+          {result.koreanText}
+        </p>
+      )}
     </button>
   );
 };
@@ -603,7 +683,7 @@ function handleClickIfNoSelection(callback: () => void) {
   };
 }
 
-const VerseItem: React.FC<{ verse: Verse; language: Language; showOriginal: boolean; englishText?: string; koreanText?: string; originalFontSize: FontSizePreset; translationFontSize: FontSizePreset; onOriginalFontCycle: () => void; onTranslationFontCycle: () => void; isHighlighted?: boolean; }> = ({ verse, language, showOriginal, englishText, koreanText, originalFontSize, translationFontSize, onOriginalFontCycle, onTranslationFontCycle, isHighlighted }) => {
+const VerseItem: React.FC<{ verse: Verse; language: Language; showOriginal: boolean; englishText?: string; koreanText?: string; originalFontSize: FontSizePreset; translationFontSize: FontSizePreset; onOriginalFontCycle: () => void; onTranslationFontCycle: () => void; isHighlighted?: boolean; onWordClick?: (strongs: string, text: string) => void; }> = ({ verse, language, showOriginal, englishText, koreanText, originalFontSize, translationFontSize, onOriginalFontCycle, onTranslationFontCycle, isHighlighted, onWordClick }) => {
   const rtl = isRTL(language);
   const fontClass = language === 'HE' ? 'font-he' : language === 'AR' ? 'font-ar' : '';
   const origSizeClass = rtl ? ORIGINAL_RTL_FONT_SIZES[originalFontSize] : ORIGINAL_FONT_SIZES[originalFontSize];
@@ -611,7 +691,21 @@ const VerseItem: React.FC<{ verse: Verse; language: Language; showOriginal: bool
   return (
     <div id={`verse-${verse.number}`} className={`py-4 border-b border-bible-border/40 transition-all duration-1000 ${rtl ? 'text-right' : ''} ${isHighlighted ? 'bg-bible-accent/10 border-bible-accent ring-1 ring-bible-accent/30 shadow-inner px-4 -mx-4 rounded-xl' : ''}`}>
       <div className={`flex gap-3 ${rtl ? 'flex-row-reverse' : ''}`}><span className="shrink-0 w-7 h-7 rounded-full bg-bible-surface border border-bible-border flex items-center justify-center mt-1 shadow-sm"><span className="text-[10px] font-black text-bible-accent">{verse.number}</span></span>
-        {showOriginal && (<p className={`font-serif text-bible-ink flex-1 cursor-pointer hover:bg-bible-surface/30 rounded-lg transition-colors px-2 -mx-2 py-0.5 ${fontClass} ${origSizeClass}`} onClick={handleClickIfNoSelection(onOriginalFontCycle)}>{verse.text}</p>)}
+        {showOriginal && (
+          <div className={`font-serif text-bible-ink flex-1 hover:bg-bible-surface/30 rounded-lg transition-colors px-2 -mx-2 py-0.5 ${fontClass} ${origSizeClass}`} dir={rtl ? 'rtl' : 'ltr'}>
+            {verse.words && verse.words.length > 0 ? (
+              <div className="flex flex-wrap gap-x-1.5 gap-y-1">
+                {verse.words.map((w, i) => (
+                  <span key={i} className={w.strongs ? "cursor-pointer hover:text-bible-accent transition-colors" : ""} onClick={() => w.strongs && onWordClick?.(w.strongs, w.text)}>
+                    {w.text}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p onClick={handleClickIfNoSelection(onOriginalFontCycle)} className="cursor-pointer">{verse.text}</p>
+            )}
+          </div>
+        )}
       </div>
       {(englishText || koreanText) && (
         <div className={`mt-3 space-y-2.5 ${rtl ? 'pr-10' : 'pl-10'}`}>

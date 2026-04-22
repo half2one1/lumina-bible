@@ -1,8 +1,15 @@
 import { BookMeta, BIBLE_BOOKS, BaseLanguage } from './bibleStructure';
 
+export interface WordSpan {
+  text: string;
+  strongs?: string;
+  transliteration?: string;
+}
+
 export interface Verse {
   number: number;
   text: string;
+  words?: WordSpan[];
 }
 
 export interface ChapterData {
